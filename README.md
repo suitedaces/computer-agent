@@ -34,7 +34,7 @@ source venv/bin/activate  # or `venv\Scripts\activate` on Windows
 pip install -r requirements.txt
 
 # Add API key to .env
-echo "ANTHROPIC_API_KEY=your-key-here" > .env
+echo "ANTHROPIC_API_KEY=your-key-here" >> .env
 
 # Run
 python run.py
