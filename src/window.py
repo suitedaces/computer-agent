@@ -261,6 +261,8 @@ class MainWindow(QMainWindow):
                 border: 1px solid #4CAF50;
             }
         """)
+        # Connect textChanged signal
+        self.input_area.textChanged.connect(self.update_run_button)
         input_layout.addWidget(self.input_area)
 
         # Control buttons with modern styling
@@ -843,4 +845,4 @@ class MainWindow(QMainWindow):
             return
             
         # For all other keys, use default handling
-        super(QTextEdit, self.input_area).keyPressEvent(event)
+        QTextEdit.keyPressEvent(self.input_area, event)
