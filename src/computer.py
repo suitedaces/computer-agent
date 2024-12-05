@@ -1,9 +1,9 @@
-import pyautogui_client
+from wsl import pyautogui_client
 from PIL import Image
 import io
 import base64
 import time
-import screenshot as sc
+from wsl import screenshot as sc
 
 pyautogui = pyautogui_client.PyAutoGUIClient()
 
