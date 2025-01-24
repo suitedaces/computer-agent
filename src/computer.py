@@ -8,41 +8,75 @@ class ComputerControl:
     def __init__(self):
         self.screen_width, self.screen_height = pyautogui.size()
         pyautogui.PAUSE = 0.5  # Add a small delay between actions for stability
+        self.last_click_position = None
         
     def perform_action(self, action):
         action_type = action['type']
         
-        if action_type == 'mouse_move':
-            x, y = self.map_from_ai_space(action['x'], action['y'])
-            pyautogui.moveTo(x, y)
-        elif action_type == 'left_click':
-            pyautogui.click()
-            time.sleep(0.1)  # Add a small delay after clicking
-        elif action_type == 'right_click':
-            pyautogui.rightClick()
-            time.sleep(0.1)
-        elif action_type == 'middle_click':
-            pyautogui.middleClick()
-            time.sleep(0.1)
-        elif action_type == 'double_click':
-            pyautogui.doubleClick()
-            time.sleep(0.1)
-        elif action_type == 'left_click_drag':
-            start_x, start_y = pyautogui.position()
-            end_x, end_y = self.map_from_ai_space(action['x'], action['y'])
-            pyautogui.dragTo(end_x, end_y, button='left', duration=0.5)
-        elif action_type == 'type':
-            pyautogui.write(action['text'], interval=0.1)  # Add a small delay between keystrokes
-        elif action_type == 'key':
-            pyautogui.press(action['text'])
-            time.sleep(0.1)
-        elif action_type == 'screenshot':
-            return self.take_screenshot()
-        elif action_type == 'cursor_position':
-            x, y = pyautogui.position()
-            return self.map_to_ai_space(x, y)
-        else:
-            raise ValueError(f"Unsupported action: {action_type}")
+        # Take a screenshot before the action
+        before_screenshot = self.take_screenshot()
+        
+        try:
+            if action_type == 'mouse_move':
+                x, y = self.map_from_ai_space(action['x'], action['y'])
+                pyautogui.moveTo(x, y)
+                time.sleep(0.2)  # Wait for move to complete
+                
+            elif action_type == 'left_click':
+                pyautogui.click()
+                time.sleep(0.2)  # Wait for click to register
+                self.last_click_position = pyautogui.position()
+                
+            elif action_type == 'right_click':
+                pyautogui.rightClick()
+                time.sleep(0.2)
+                
+            elif action_type == 'middle_click':
+                pyautogui.middleClick()
+                time.sleep(0.2)
+                
+            elif action_type == 'double_click':
+                pyautogui.doubleClick()
+                time.sleep(0.2)
+                self.last_click_position = pyautogui.position()
+                
+            elif action_type == 'left_click_drag':
+                start_x, start_y = pyautogui.position()
+                end_x, end_y = self.map_from_ai_space(action['x'], action['y'])
+                pyautogui.dragTo(end_x, end_y, button='left', duration=0.5)
+                time.sleep(0.2)
+                
+            elif action_type == 'type':
+                # If we have a last click position, ensure we're still there
+                if self.last_click_position:
+                    current_pos = pyautogui.position()
+                    if current_pos != self.last_click_position:
+                        pyautogui.click(self.last_click_position)
+                        time.sleep(0.2)
+                
+                pyautogui.write(action['text'], interval=0.1)
+                time.sleep(0.2)
+                
+            elif action_type == 'key':
+                pyautogui.press(action['text'])
+                time.sleep(0.2)
+                
+            elif action_type == 'screenshot':
+                return self.take_screenshot()
+                
+            elif action_type == 'cursor_position':
+                x, y = pyautogui.position()
+                return self.map_to_ai_space(x, y)
+                
+            else:
+                raise ValueError(f"Unsupported action: {action_type}")
+            
+            # Take a screenshot after the action
+            after_screenshot = self.take_screenshot()
+            return after_screenshot
+            
+        except Exception as e:
+            raise Exception(f"Action failed: {action_type} - {str(e)}")
         
     def take_screenshot(self):
         screenshot = pyautogui.screenshot()
