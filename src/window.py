@@ -5,6 +5,7 @@ from PyQt6.QtGui import QFont, QKeySequence, QShortcut, QAction, QTextCursor, QD
 from .store import Store
 from .anthropic import AnthropicClient  
 from .voice_control import VoiceController
+from .prompt_manager import PromptManager
 import logging
 import qtawesome as qta
 
@@ -22,11 +23,95 @@ class AgentThread(QThread):
         self.store.run_agent(self.update_signal.emit)
         self.finished_signal.emit()
 
+class SystemPromptDialog(QDialog):
+    def __init__(self, parent=None, prompt_manager=None):
+        super().__init__(parent)
+        self.prompt_manager = prompt_manager
+        self.setWindowTitle("Edit System Prompt")
+        self.setFixedSize(800, 600)
+        
+        layout = QVBoxLayout()
+        
+        # Description
+        desc_label = QLabel("Edit the system prompt that defines the agent's behavior. Be careful with changes as they may affect functionality.")
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #666; margin: 10px 0;")
+        layout.addWidget(desc_label)
+        
+        # Prompt editor
+        self.prompt_editor = QTextEdit()
+        self.prompt_editor.setPlainText(self.prompt_manager.get_current_prompt())
+        self.prompt_editor.setStyleSheet("""
+            QTextEdit {
+                background-color: #262626;
+                border: 1px solid #333333;
+                border-radius: 8px;
+                color: #ffffff;
+                padding: 12px;
+                font-family: Inter;
+                font-size: 14px;
+            }
+        """)
+        layout.addWidget(self.prompt_editor)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        reset_btn = QPushButton("Reset to Default")
+        reset_btn.clicked.connect(self.reset_prompt)
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #666666;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #777777;
+            }
+        """)
+        
+        save_btn = QPushButton("Save Changes")
+        save_btn.clicked.connect(self.save_changes)
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        
+        button_layout.addWidget(reset_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(save_btn)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+    
+    def reset_prompt(self):
+        if self.prompt_manager.reset_to_default():
+            self.prompt_editor.setPlainText(self.prompt_manager.get_current_prompt())
+    
+    def save_changes(self):
+        new_prompt = self.prompt_editor.toPlainText()
+        if self.prompt_manager.save_prompt(new_prompt):
+            self.accept()
+        else:
+            # Show error message
+            pass
+
 class MainWindow(QMainWindow):
     def __init__(self, store, anthropic_client):
         super().__init__()
         self.store = store
         self.anthropic_client = anthropic_client
+        self.prompt_manager = PromptManager()
         
         # Initialize theme settings
         self.settings = QSettings('Grunty', 'Preferences')
@@ -156,10 +241,15 @@ class MainWindow(QMainWindow):
         file_menu = QMenu("File")
         new_task_action = QAction("New Task", self)
         new_task_action.setShortcut("Ctrl+N")
+        edit_prompt_action = QAction("Edit System Prompt", self)
+        edit_prompt_action.setShortcut("Ctrl+E")
+        edit_prompt_action.triggered.connect(self.show_prompt_dialog)
         quit_action = QAction("Quit", self)
         quit_action.setShortcut("Ctrl+Q")
         quit_action.triggered.connect(self.quit_application)
         file_menu.addAction(new_task_action)
+        file_menu.addAction(edit_prompt_action)
+        file_menu.addSeparator()
         file_menu.addAction(quit_action)
         
         file_button = QPushButton("File")
@@ -837,3 +927,7 @@ class MainWindow(QMainWindow):
     def quit_application(self):
         # Actually quit the application
         QApplication.quit()
+
+    def show_prompt_dialog(self):
+        dialog = SystemPromptDialog(self, self.prompt_manager)
+        dialog.exec()
