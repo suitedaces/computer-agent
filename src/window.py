@@ -353,7 +353,6 @@ class MainWindow(QMainWindow):
 
         # Control buttons with modern styling
         control_layout = QHBoxLayout()
-        control_layout.setSpacing(8)
         
         self.run_button = QPushButton(qta.icon('fa5s.play', color='white'), "Start")
         self.stop_button = QPushButton(qta.icon('fa5s.stop', color='white'), "Stop")
@@ -914,17 +913,26 @@ class MainWindow(QMainWindow):
         self.oldPos = event.globalPosition().toPoint()
         
     def closeEvent(self, event):
-        # Override close event to minimize to tray instead of quitting
-        event.ignore()
-        self.hide()
-        self.tray_icon.showMessage(
-            "Grunty 👨🏽‍💻",
-            "Application minimized to tray",
-            QSystemTrayIcon.MessageIcon.Information,
-            2000
-        )
+        """Handle window close event - properly quit the application"""
+        self.quit_application()
+        event.accept()  # Allow the close
         
     def quit_application(self):
+        """Clean up resources and quit the application"""
+        # Stop any running agent
+        self.store.stop_run()
+        
+        # Clean up voice control
+        if hasattr(self, 'voice_controller'):
+            self.voice_controller.cleanup()
+        
+        # Save settings
+        self.settings.sync()
+        
+        # Hide tray icon before quitting
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+        
         # Actually quit the application
         QApplication.quit()
 

@@ -101,9 +101,11 @@ class Store:
                 break
         
     def stop_run(self):
-        """Stop the current agent run and clean up"""
+        """Stop the current agent run and clean up resources"""
         self.running = False
-        logger.info("Stopping agent run")
+        if hasattr(self, 'computer_control'):
+            self.computer_control.cleanup()
+        logger.info("Agent run stopped")
         # Add a message to the run history to indicate stopping
         self.run_history.append({
             "role": "user",
@@ -180,3 +182,7 @@ class Store:
                         update_callback("Assistant: Task completed! ")
                     else:
                         update_callback(f"Assistant action: {tool_name} - {json.dumps(tool_input)}")
+
+    def cleanup(self):
+        if hasattr(self, 'computer_control'):
+            self.computer_control.cleanup()

@@ -99,3 +99,15 @@ class VoiceController(QObject):
         """Call this when command processing is complete"""
         self.is_processing = False
         self.speak("Ready for next command")
+
+    def cleanup(self):
+        """Clean up voice control resources"""
+        # Stop voice control if it's running
+        if self.is_listening:
+            self.toggle_voice_control()  # This will stop the listening thread
+            
+        # Stop any pending speech
+        if hasattr(self, 'speak_queue'):
+            self.speak_queue.put(None)  # Signal speak thread to stop
+            if hasattr(self, 'speak_thread'):
+                self.speak_thread.join(timeout=1.0)

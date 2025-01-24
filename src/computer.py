@@ -95,3 +95,8 @@ class ComputerControl:
         
     def resize_for_ai(self, screenshot):
         return screenshot.resize((1280, 800), Image.LANCZOS)
+
+    def cleanup(self):
+        """Clean up any resources or running processes"""
+        # Add cleanup code here if needed
+        pass
