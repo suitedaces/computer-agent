@@ -29,7 +29,7 @@ class MainWindow(QMainWindow):
         self.anthropic_client = anthropic_client
         
         # Initialize theme settings
-        self.settings = QSettings('NOVA', 'Preferences')
+        self.settings = QSettings('Grunty', 'Preferences')
         self.dark_mode = self.settings.value('dark_mode', True, type=bool)
         
         # Initialize voice control
@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
         if self.store.error and "ANTHROPIC_API_KEY not found" in self.store.error:
             self.show_api_key_dialog()
         
-        self.setWindowTitle("NOVA 👨💻")
+        self.setWindowTitle("Grunty 👨💻")
         self.setGeometry(100, 100, 400, 600)
         self.setMinimumSize(400, 500)  # Increased minimum size for better usability
         
@@ -147,8 +147,8 @@ class MainWindow(QMainWindow):
         title_bar_layout = QHBoxLayout(title_bar)
         title_bar_layout.setContentsMargins(10, 5, 10, 5)
         
-        # Add NOVA title with robot emoji
-        title_label = QLabel("NOVA 🤖")
+        # Add Grunty title with robot emoji
+        title_label = QLabel("Grunty 🤖")
         title_label.setObjectName("titleLabel")
         title_bar_layout.addWidget(title_label)
         
@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
         tray_menu = QMenu()
         
         # Add a title item (non-clickable)
-        title_action = tray_menu.addAction("NOVA 👨🏽‍💻")
+        title_action = tray_menu.addAction("Grunty 👨🏽‍💻")
         title_action.setEnabled(False)
         tray_menu.addSeparator()
         
@@ -557,7 +557,7 @@ class MainWindow(QMainWindow):
         
         # Show a notification when the app starts
         self.tray_icon.showMessage(
-            "NOVA is running",
+            "Grunty is running",
             "Click the robot icon in the menu bar to get started!",
             QSystemTrayIcon.MessageIcon.Information,
             3000
@@ -828,7 +828,7 @@ class MainWindow(QMainWindow):
         event.ignore()
         self.hide()
         self.tray_icon.showMessage(
-            "NOVA 👨🏽‍💻",
+            "Grunty 👨🏽‍💻",
             "Application minimized to tray",
             QSystemTrayIcon.MessageIcon.Information,
             2000
