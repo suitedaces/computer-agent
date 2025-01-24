@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit, 
-                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar)
+                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar, QStatusBar)
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QThread, QUrl, QSettings
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut, QAction, QTextCursor, QDesktopServices
 from .store import Store
@@ -120,7 +120,12 @@ class MainWindow(QMainWindow):
         # Initialize voice control
         self.voice_controller = VoiceController()
         self.voice_controller.voice_input_signal.connect(self.handle_voice_input)
-        self.voice_controller.status_signal.connect(self.update_voice_status)
+        self.voice_controller.status_signal.connect(self.update_status)
+        
+        # Status bar for voice feedback
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Voice control ready")
         
         # Check if API key is missing
         if self.store.error and "ANTHROPIC_API_KEY not found" in self.store.error:
@@ -837,6 +842,10 @@ class MainWindow(QMainWindow):
         self.input_area.setText(text)
         if text.strip():  # Only run if there's actual text
             self.run_agent()
+        
+    def update_status(self, message):
+        """Update status bar with voice control status"""
+        self.status_bar.showMessage(message)
         
     def update_voice_status(self, status):
         """Update the action log with voice control status"""

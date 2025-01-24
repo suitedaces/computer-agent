@@ -14,7 +14,7 @@ class VoiceController(QObject):
         self.recognizer = sr.Recognizer()
         self.engine = pyttsx3.init()
         self.is_listening = False
-        self.is_processing = False  # New flag to track if we're processing a command
+        self.is_processing = False  # Flag to track if we're processing a command
         self.listening_thread = None
         self.wake_word = "hey nova"  # Wake word to activate voice control
         
@@ -24,60 +24,81 @@ class VoiceController(QObject):
         self.engine.setProperty('voice', voices[1].id)  # Use female voice
         
     def speak(self, text):
-        """Text-to-speech output"""
-        self.engine.say(text)
-        self.engine.runAndWait()
-        
+        """Text-to-speech output with enhanced status updates"""
+        if not text:
+            return
+            
+        self.status_signal.emit("Initializing speech...")
+        try:
+            # Configure voice settings for this utterance
+            self.engine.setProperty('rate', 150)
+            self.status_signal.emit("Starting to speak...")
+            
+            # Break text into sentences for better status updates
+            sentences = text.split('.')
+            for i, sentence in enumerate(sentences, 1):
+                if sentence.strip():
+                    self.status_signal.emit(f"Speaking {i}/{len(sentences)}: {sentence.strip()}")
+                    self.engine.say(sentence)
+                    self.engine.runAndWait()
+                    
+            self.status_signal.emit("Finished speaking")
+        except Exception as e:
+            self.status_signal.emit(f"Speech error: {str(e)}")
+        finally:
+            self.status_signal.emit("Ready")
+            
     def listen_for_command(self):
-        """Listen for voice input and convert to text"""
+        """Listen for voice input with enhanced status updates"""
         with sr.Microphone() as source:
-            self.recognizer.adjust_for_ambient_noise(source)
             try:
-                self.status_signal.emit("Listening...")
-                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                self.status_signal.emit("Processing...")
+                self.status_signal.emit("Adjusting for ambient noise...")
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 
-                text = self.recognizer.recognize_google(audio).lower()
-                self.status_signal.emit(f"Recognized: {text}")
-                return text
+                self.status_signal.emit("Listening for wake word...")
+                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
+                
+                self.status_signal.emit("Processing audio...")
+                text = self.recognizer.recognize_google(audio).lower().strip()
+                self.status_signal.emit(f"Heard: {text}")  # Debug what was heard
+                
+                # More flexible wake word detection
+                if any(text.startswith(word) for word in ["hey nova", "hey nora", "hi nova", "hi nora"]):
+                    self.status_signal.emit("Wake word detected! Listening for command...")
+                    audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
+                    self.status_signal.emit("Processing command...")
+                    command = self.recognizer.recognize_google(audio).lower()
+                    self.status_signal.emit(f"Command received: {command}")
+                    return command
+                else:
+                    self.status_signal.emit("Wake word not detected, continuing to listen...")
+                    return None
+                
             except sr.WaitTimeoutError:
-                return None
+                self.status_signal.emit("Listening timed out")
             except sr.UnknownValueError:
                 self.status_signal.emit("Could not understand audio")
-                return None
-            except sr.RequestError:
-                self.status_signal.emit("Could not request results")
-                return None
-                
+            except sr.RequestError as e:
+                self.status_signal.emit(f"Speech recognition error: {str(e)}")
+            except Exception as e:
+                self.status_signal.emit(f"Error: {str(e)}")
+            finally:
+                self.status_signal.emit("Ready")
+            
+            return None
+            
     def voice_control_loop(self):
         """Main loop for voice control"""
         while self.is_listening:
-            try:
-                if not self.is_processing:  # Only listen for new commands if not processing
+            if not self.is_processing:
+                try:
+                    self.is_processing = True
                     command = self.listen_for_command()
                     if command:
-                        if self.wake_word in command:
-                            # Wake word detected, listen for the actual command
-                            self.speak("Yes, I'm listening")
-                            command = self.listen_for_command()
-                            if command:
-                                # Don't include the wake word in the command
-                                clean_command = command.replace(self.wake_word, "").strip()
-                                if clean_command:
-                                    self.is_processing = True  # Set processing flag
-                                    self.voice_input_signal.emit(clean_command)
-                                    self.speak("Processing your request")
-                                else:
-                                    self.speak("I didn't catch that. Please try again.")
-                        else:
-                            # If we're already listening and get a command without wake word,
-                            # process it directly
-                            self.is_processing = True  # Set processing flag
-                            self.voice_input_signal.emit(command)
-                            self.speak("Processing your request")
-                time.sleep(0.1)  # Small delay to prevent CPU hogging
-            except Exception as e:
-                self.status_signal.emit(f"Error: {str(e)}")
+                        self.voice_input_signal.emit(command)
+                finally:
+                    self.is_processing = False
+            time.sleep(0.1)  # Small delay to prevent CPU hogging
                 
     def toggle_voice_control(self):
         """Toggle voice control on/off"""
@@ -86,7 +107,7 @@ class VoiceController(QObject):
             self.listening_thread = threading.Thread(target=self.voice_control_loop)
             self.listening_thread.daemon = True
             self.listening_thread.start()
-            self.status_signal.emit("Voice control activated")
+            self.status_signal.emit("Voice control activated - Say 'hey nova' to start")
             self.speak("Voice control activated")
         else:
             self.is_listening = False
