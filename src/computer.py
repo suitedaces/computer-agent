@@ -1,8 +1,11 @@
-import pyautogui
+from wsl import pyautogui_client
 from PIL import Image
 import io
 import base64
 import time
+from wsl import screenshot as sc
+
+pyautogui = pyautogui_client.PyAutoGUIClient()
 
 class ComputerControl:
     def __init__(self):
@@ -79,7 +82,8 @@ class ComputerControl:
             raise Exception(f"Action failed: {action_type} - {str(e)}")
         
     def take_screenshot(self):
-        screenshot = pyautogui.screenshot()
+        #screenshot = pyautogui.screenshot()
+        screenshot = sc.screenshot()
         ai_screenshot = self.resize_for_ai(screenshot)
         buffered = io.BytesIO()
         ai_screenshot.save(buffered, format="PNG")
