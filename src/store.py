@@ -63,25 +63,35 @@ class Store:
                     self.running = False
                     break
                 
-                self.computer_control.perform_action(action)
-
-                logger.info(f"Performed action: {action['type']}")
-                
-                screenshot = self.computer_control.take_screenshot()
-                self.run_history.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": self.last_tool_use_id,
+                try:
+                    # Perform the action and get the screenshot
+                    screenshot = self.computer_control.perform_action(action)
+                    
+                    if screenshot:  # Only add screenshot if one was returned
+                        self.run_history.append({
+                            "role": "user",
                             "content": [
-                                {"type": "text", "text": "Here is a screenshot after the action was executed"},
-                                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": screenshot}}
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": self.last_tool_use_id,
+                                    "content": [
+                                        {"type": "text", "text": "Here is a screenshot after the action was executed"},
+                                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": screenshot}}
+                                    ]
+                                }
                             ]
-                        }
-                    ]
-                })
-                logger.debug("Screenshot added to run history")
+                        })
+                        logger.debug("Screenshot added to run history")
+                    
+                except Exception as action_error:
+                    error_msg = f"Action failed: {str(action_error)}"
+                    update_callback(f"Error: {error_msg}")
+                    logger.error(error_msg)
+                    # Don't stop running, let the AI handle the error
+                    self.run_history.append({
+                        "role": "user",
+                        "content": [{"type": "text", "text": error_msg}]
+                    })
                 
             except Exception as e:
                 self.error = str(e)
@@ -91,8 +101,16 @@ class Store:
                 break
         
     def stop_run(self):
+        """Stop the current agent run and clean up resources"""
         self.running = False
+        if hasattr(self, 'computer_control'):
+            self.computer_control.cleanup()
         logger.info("Agent run stopped")
+        # Add a message to the run history to indicate stopping
+        self.run_history.append({
+            "role": "user",
+            "content": [{"type": "text", "text": "Agent run stopped by user."}]
+        })
         
     def extract_action(self, message):
         logger.debug(f"Extracting action from message: {message}")
@@ -161,6 +179,10 @@ class Store:
                         }
                         update_callback(f"Performed action: {json.dumps(action)}")
                     elif tool_name == 'finish_run':
-                        update_callback("Assistant: Task completed! ✨")
+                        update_callback("Assistant: Task completed! ")
                     else:
                         update_callback(f"Assistant action: {tool_name} - {json.dumps(tool_input)}")
+
+    def cleanup(self):
+        if hasattr(self, 'computer_control'):
+            self.computer_control.cleanup()

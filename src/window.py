@@ -1,9 +1,11 @@
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit, 
-                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar)
+                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar, QStatusBar)
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QThread, QUrl, QSettings
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut, QAction, QTextCursor, QDesktopServices
 from .store import Store
 from .anthropic import AnthropicClient  
+from .voice_control import VoiceController
+from .prompt_manager import PromptManager
 import logging
 import qtawesome as qta
 
@@ -21,15 +23,109 @@ class AgentThread(QThread):
         self.store.run_agent(self.update_signal.emit)
         self.finished_signal.emit()
 
+class SystemPromptDialog(QDialog):
+    def __init__(self, parent=None, prompt_manager=None):
+        super().__init__(parent)
+        self.prompt_manager = prompt_manager
+        self.setWindowTitle("Edit System Prompt")
+        self.setFixedSize(800, 600)
+        
+        layout = QVBoxLayout()
+        
+        # Description
+        desc_label = QLabel("Edit the system prompt that defines the agent's behavior. Be careful with changes as they may affect functionality.")
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #666; margin: 10px 0;")
+        layout.addWidget(desc_label)
+        
+        # Prompt editor
+        self.prompt_editor = QTextEdit()
+        self.prompt_editor.setPlainText(self.prompt_manager.get_current_prompt())
+        self.prompt_editor.setStyleSheet("""
+            QTextEdit {
+                background-color: #262626;
+                border: 1px solid #333333;
+                border-radius: 8px;
+                color: #ffffff;
+                padding: 12px;
+                font-family: Inter;
+                font-size: 14px;
+            }
+        """)
+        layout.addWidget(self.prompt_editor)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        reset_btn = QPushButton("Reset to Default")
+        reset_btn.clicked.connect(self.reset_prompt)
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #666666;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #777777;
+            }
+        """)
+        
+        save_btn = QPushButton("Save Changes")
+        save_btn.clicked.connect(self.save_changes)
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        
+        button_layout.addWidget(reset_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(save_btn)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+    
+    def reset_prompt(self):
+        if self.prompt_manager.reset_to_default():
+            self.prompt_editor.setPlainText(self.prompt_manager.get_current_prompt())
+    
+    def save_changes(self):
+        new_prompt = self.prompt_editor.toPlainText()
+        if self.prompt_manager.save_prompt(new_prompt):
+            self.accept()
+        else:
+            # Show error message
+            pass
+
 class MainWindow(QMainWindow):
     def __init__(self, store, anthropic_client):
         super().__init__()
         self.store = store
         self.anthropic_client = anthropic_client
+        self.prompt_manager = PromptManager()
         
         # Initialize theme settings
         self.settings = QSettings('Grunty', 'Preferences')
         self.dark_mode = self.settings.value('dark_mode', True, type=bool)
+        
+        # Initialize voice control
+        self.voice_controller = VoiceController()
+        self.voice_controller.voice_input_signal.connect(self.handle_voice_input)
+        self.voice_controller.status_signal.connect(self.update_status)
+        
+        # Status bar for voice feedback
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Voice control ready")
         
         # Check if API key is missing
         if self.store.error and "ANTHROPIC_API_KEY not found" in self.store.error:
@@ -44,7 +140,6 @@ class MainWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.setup_ui()
-        self.setup_menu_bar()
         self.setup_tray()
         self.setup_shortcuts()
         
@@ -124,77 +219,73 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # Main layout with padding for shadow
+        # Create main layout
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(15, 15, 15, 15)
         central_widget.setLayout(main_layout)
         
         # Container widget for rounded corners
-        container = QWidget()
-        container.setObjectName("container")
-        container.setStyleSheet("""
-            QWidget#container {
-                background-color: #1a1a1a;
-                border-radius: 12px;
-                border: 1px solid #333333;
-            }
-        """)
+        self.container = QWidget()  # Make it an instance variable
+        self.container.setObjectName("container")
         container_layout = QVBoxLayout()
         container_layout.setSpacing(0)  # Remove spacing between elements
-        container.setLayout(container_layout)
+        self.container.setLayout(container_layout)
         
-        # Title bar
+        # Create title bar
         title_bar = QWidget()
-        title_bar_layout = QHBoxLayout()
-        title_bar.setLayout(title_bar_layout)
+        title_bar.setObjectName("titleBar")
+        title_bar_layout = QHBoxLayout(title_bar)
+        title_bar_layout.setContentsMargins(10, 5, 10, 5)
         
-        title_label = QLabel("Grunty 👨🏽‍💻")
-        title_label.setObjectName("title_label")
-        title_label.setFont(QFont("Inter", 16, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #ffffff; padding: 5px;")
+        # Add Grunty title with robot emoji
+        title_label = QLabel("Grunty 🤖")
+        title_label.setObjectName("titleLabel")
         title_bar_layout.addWidget(title_label)
         
+        # Add File Menu
+        file_menu = QMenu("File")
+        new_task_action = QAction("New Task", self)
+        new_task_action.setShortcut("Ctrl+N")
+        edit_prompt_action = QAction("Edit System Prompt", self)
+        edit_prompt_action.setShortcut("Ctrl+E")
+        edit_prompt_action.triggered.connect(self.show_prompt_dialog)
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut("Ctrl+Q")
+        quit_action.triggered.connect(self.quit_application)
+        file_menu.addAction(new_task_action)
+        file_menu.addAction(edit_prompt_action)
+        file_menu.addSeparator()
+        file_menu.addAction(quit_action)
+        
+        file_button = QPushButton("File")
+        file_button.setObjectName("menuButton")
+        file_button.clicked.connect(lambda: file_menu.exec(file_button.mapToGlobal(QPoint(0, file_button.height()))))
+        title_bar_layout.addWidget(file_button)
+        
+        # Add spacer to push remaining items to the right
         title_bar_layout.addStretch()
         
-        # Add theme toggle button before github button
+        # Theme toggle button
         self.theme_button = QPushButton()
-        self.update_theme_button()
-        self.theme_button.setFlat(True)
-        self.theme_button.setStyleSheet("""
-            QPushButton {
-                color: #ffffff;
-                background-color: transparent;
-                border-radius: 8px;
-                padding: 4px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #333333;
-            }
-        """)
+        self.theme_button.setObjectName("titleBarButton")
         self.theme_button.clicked.connect(self.toggle_theme)
+        self.update_theme_button()
         title_bar_layout.addWidget(self.theme_button)
         
-        # Window controls
-        github_button = QPushButton()
-        github_button.setObjectName("github_button")
-        github_button.setIcon(qta.icon('fa5b.github', color='white'))
-        github_button.setFlat(True)
-        
-        minimize_button = QPushButton("—")
-        minimize_button.setObjectName("minimize_button")
-        minimize_button.setFlat(True)
+        # Minimize and close buttons
+        minimize_button = QPushButton("−")
+        minimize_button.setObjectName("titleBarButton")
+        minimize_button.clicked.connect(self.showMinimized)
+        title_bar_layout.addWidget(minimize_button)
         
         close_button = QPushButton("×")
-        close_button.setObjectName("close_button")
-        close_button.setFlat(True)
-        
-        title_bar_layout.addWidget(github_button)
-        title_bar_layout.addWidget(minimize_button)
+        close_button.setObjectName("titleBarButton")
+        close_button.clicked.connect(self.close)
         title_bar_layout.addWidget(close_button)
+        
         container_layout.addWidget(title_bar)
         
-        # Action log with modern styling - Now at the top with flexible space
+        # Action log with modern styling
         self.action_log = QTextEdit()
         self.action_log.setReadOnly(True)
         self.action_log.setStyleSheet("""
@@ -267,10 +358,17 @@ class MainWindow(QMainWindow):
 
         # Control buttons with modern styling
         control_layout = QHBoxLayout()
-        control_layout.setSpacing(8)
         
         self.run_button = QPushButton(qta.icon('fa5s.play', color='white'), "Start")
         self.stop_button = QPushButton(qta.icon('fa5s.stop', color='white'), "Stop")
+        
+        # Connect button signals
+        self.run_button.clicked.connect(self.run_agent)
+        self.stop_button.clicked.connect(self.stop_agent)
+        
+        # Initialize button states
+        self.run_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
         
         for button in (self.run_button, self.stop_button):
             button.setFixedHeight(40)
@@ -294,7 +392,7 @@ class MainWindow(QMainWindow):
                         color: #666666;
                     }
                 """)
-            else:
+            else:  # Stop button
                 button.setStyleSheet("""
                     QPushButton {
                         background-color: #ff4444;
@@ -314,36 +412,42 @@ class MainWindow(QMainWindow):
                         color: #666666;
                     }
                 """)
+            control_layout.addWidget(button)
         
-        control_layout.addWidget(self.run_button)
-        control_layout.addWidget(self.stop_button)
+        # Add voice control button to control layout
+        self.voice_button = QPushButton(qta.icon('fa5s.microphone', color='white'), "Voice")
+        self.voice_button.setFixedHeight(40)
+        self.voice_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 0 24px;
+                font-family: Inter;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:checked {
+                background-color: #ff4444;
+            }
+        """)
+        self.voice_button.setCheckable(True)
+        self.voice_button.clicked.connect(self.toggle_voice_control)
+        control_layout.addWidget(self.voice_button)
+        
         input_layout.addLayout(control_layout)
 
         # Add input section to main container
         container_layout.addWidget(input_section)
 
         # Add the container to the main layout
-        main_layout.addWidget(container)
+        main_layout.addWidget(self.container)
         
-        # Set window shadow and background
-        self.setStyleSheet("""
-            MainWindow {
-                background-color: transparent;
-            }
-            QWidget#container {
-                background-color: #1a1a1a;
-                border-radius: 12px;
-                border: 1px solid #333333;
-            }
-        """)
-        
-        # Connect signals
-        self.run_button.clicked.connect(self.run_agent)
-        self.stop_button.clicked.connect(self.stop_agent)
-        minimize_button.clicked.connect(self.showMinimized)
-        close_button.clicked.connect(self.close)
-        
-        # Update the theme
+        # Apply theme after all widgets are set up
         self.apply_theme()
         
     def update_theme_button(self):
@@ -361,40 +465,17 @@ class MainWindow(QMainWindow):
         self.apply_theme()
 
     def apply_theme(self):
-        if self.dark_mode:
-            # Dark theme colors
-            colors = {
-                'bg': '#1a1a1a',
-                'secondary_bg': '#262626',
-                'input_bg': '#1e1e1e',
-                'text': '#ffffff',
-                'button_text': '#ffffff',  # Add button text color
-                'secondary_text': '#666666',
-                'border': '#333333',
-                'accent': '#4CAF50',
-                'accent_hover': '#45a049',
-                'error': '#ff4444',
-                'error_hover': '#ff3333',
-                'button_hover': '#333333'  # Add button hover color
-            }
-        else:
-            # Light theme colors
-            colors = {
-                'bg': '#ffffff',
-                'secondary_bg': '#f5f5f5',
-                'input_bg': '#fafafa',
-                'text': '#000000',
-                'button_text': '#000000',  # Add button text color
-                'secondary_text': '#666666',
-                'border': '#e0e0e0',
-                'accent': '#4CAF50',
-                'accent_hover': '#45a049',
-                'error': '#ff4444',
-                'error_hover': '#ff3333',
-                'button_hover': '#e0e0e0'  # Add button hover color
-            }
+        # Apply styles based on theme
+        colors = {
+            'bg': '#1a1a1a' if self.dark_mode else '#ffffff',
+            'text': '#ffffff' if self.dark_mode else '#000000',
+            'button_bg': '#333333' if self.dark_mode else '#f0f0f0',
+            'button_text': '#ffffff' if self.dark_mode else '#000000',
+            'button_hover': '#4CAF50' if self.dark_mode else '#e0e0e0',
+            'border': '#333333' if self.dark_mode else '#e0e0e0'
+        }
 
-        # Update container styles
+        # Container style
         container_style = f"""
             QWidget#container {{
                 background-color: {colors['bg']};
@@ -402,15 +483,15 @@ class MainWindow(QMainWindow):
                 border: 1px solid {colors['border']};
             }}
         """
-        self.findChild(QWidget, "container").setStyleSheet(container_style)
+        self.container.setStyleSheet(container_style)  # Use instance variable
 
         # Update title label
-        self.findChild(QLabel, "title_label").setStyleSheet(f"color: {colors['text']}; padding: 5px;")
+        self.findChild(QLabel, "titleLabel").setStyleSheet(f"color: {colors['text']}; padding: 5px;")
 
         # Update action log
         self.action_log.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {colors['secondary_bg']};
+                background-color: {colors['bg']};
                 border: none;
                 border-radius: 0;
                 color: {colors['text']};
@@ -423,17 +504,17 @@ class MainWindow(QMainWindow):
         # Update input area
         self.input_area.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {colors['secondary_bg']};
+                background-color: {colors['bg']};
                 border: 1px solid {colors['border']};
                 border-radius: 8px;
                 color: {colors['text']};
                 padding: 12px;
                 font-family: Inter;
                 font-size: 14px;
-                selection-background-color: {colors['accent']};
+                selection-background-color: {colors['button_hover']};
             }}
             QTextEdit:focus {{
-                border: 1px solid {colors['accent']};
+                border: 1px solid {colors['button_hover']};
             }}
         """)
 
@@ -441,19 +522,19 @@ class MainWindow(QMainWindow):
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
                 border: none;
-                background-color: {colors['secondary_bg']};
+                background-color: {colors['bg']};
                 height: 2px;
                 margin: 0;
             }}
             QProgressBar::chunk {{
-                background-color: {colors['accent']};
+                background-color: {colors['button_hover']};
             }}
         """)
 
         # Update input section
         input_section_style = f"""
             QWidget {{
-                background-color: {colors['input_bg']};
+                background-color: {colors['button_bg']};
                 border-top: 1px solid {colors['border']};
             }}
         """
@@ -475,17 +556,10 @@ class MainWindow(QMainWindow):
 
         # Apply to all window control buttons
         for button in [self.theme_button, 
-                      self.findChild(QPushButton, "github_button"),
-                      self.findChild(QPushButton, "minimize_button"),
-                      self.findChild(QPushButton, "close_button")]:
+                      self.findChild(QPushButton, "menuButton"),
+                      self.findChild(QPushButton, "titleBarButton")]:
             if button:
                 button.setStyleSheet(window_control_style)
-
-        # Update GitHub button icon color
-        github_button = self.findChild(QPushButton, "github_button")
-        if github_button:
-            github_button.setIcon(qta.icon('fa5b.github', 
-                color=colors['button_text']))
 
         # Update theme button icon
         if self.dark_mode:
@@ -508,7 +582,7 @@ class MainWindow(QMainWindow):
                     border-radius: 4px;
                 }}
                 QMenu::item:selected {{
-                    background-color: {colors['accent']};
+                    background-color: {colors['button_hover']};
                     color: white;
                 }}
                 QMenu::separator {{
@@ -521,27 +595,6 @@ class MainWindow(QMainWindow):
     def update_run_button(self):
         self.run_button.setEnabled(bool(self.input_area.toPlainText().strip()))
         
-    def setup_menu_bar(self):
-        # Create menu bar
-        menubar = QMenuBar(self)
-        self.setMenuBar(menubar)
-        
-        # File menu
-        file_menu = menubar.addMenu('File')
-        
-        # Add actions
-        new_task = QAction('New Task', self)
-        new_task.setShortcut('Ctrl+N')
-        new_task.triggered.connect(self.show)
-        
-        quit_action = QAction('Quit', self)
-        quit_action.setShortcut('Ctrl+Q')
-        quit_action.triggered.connect(self.quit_application)
-        
-        file_menu.addAction(new_task)
-        file_menu.addSeparator()
-        file_menu.addAction(quit_action)
-
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
         # Make the icon larger and more visible
@@ -630,6 +683,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(True)
         self.progress_bar.show()
         self.action_log.clear()
+        self.input_area.clear()  # Clear the input area after starting the agent
         
         self.agent_thread = AgentThread(self.store)
         self.agent_thread.update_signal.connect(self.update_log)
@@ -664,6 +718,10 @@ class MainWindow(QMainWindow):
             </div>
         '''
         self.action_log.append(completion_message)
+        
+        # Notify voice controller that processing is complete
+        if hasattr(self, 'voice_controller'):
+            self.voice_controller.finish_processing()
         
         
     def update_log(self, message):
@@ -779,40 +837,44 @@ class MainWindow(QMainWindow):
             self.action_log.verticalScrollBar().maximum()
         )
         
-    def mousePressEvent(self, event):
-        self.oldPos = event.globalPosition().toPoint()
-
-    def mouseMoveEvent(self, event):
-        delta = QPoint(event.globalPosition().toPoint() - self.oldPos)
-        self.move(self.x() + delta.x(), self.y() + delta.y())
-        self.oldPos = event.globalPosition().toPoint()
+    def handle_voice_input(self, text):
+        """Handle voice input by setting it in the input area and running the agent"""
+        self.input_area.setText(text)
+        if text.strip():  # Only run if there's actual text
+            self.run_agent()
         
-    def closeEvent(self, event):
-        # Override close event to minimize to tray instead of quitting
-        event.ignore()
-        self.hide()
-        self.tray_icon.showMessage(
-            "Grunty 👨🏽‍💻",
-            "Application minimized to tray",
-            QSystemTrayIcon.MessageIcon.Information,
-            2000
-        )
+    def update_status(self, message):
+        """Update status bar with voice control status"""
+        self.status_bar.showMessage(message)
         
-    def quit_application(self):
-        # Actually quit the application
-        QApplication.quit()
-
-    def pixmap_to_base64(self, pixmap):
-        from PyQt6.QtCore import QByteArray, QBuffer
-        import base64
+    def update_voice_status(self, status):
+        """Update the action log with voice control status"""
+        status_style = '''
+            <div style="margin: 6px 0;">
+                <span style="
+                    display: inline-flex;
+                    align-items: center;
+                    background-color: rgba(45, 45, 45, 0.95);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 100px;
+                    padding: 4px 12px;
+                    color: #4CAF50;
+                    font-family: Inter, -apple-system, system-ui, sans-serif;
+                    font-size: 13px;
+                    line-height: 1.4;
+                    white-space: nowrap;
+                ">🎤 {}</span>
+            </div>
+        '''
+        self.action_log.append(status_style.format(status))
         
-        byte_array = QByteArray()
-        buffer = QBuffer(byte_array)
-        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
-        pixmap.save(buffer, 'PNG')
-        
-        return base64.b64encode(byte_array.data()).decode()
-
+    def toggle_voice_control(self):
+        """Toggle voice control on/off"""
+        if self.voice_button.isChecked():
+            self.voice_controller.toggle_voice_control()
+        else:
+            self.voice_controller.toggle_voice_control()
+            
     def setup_shortcuts(self):
         # Essential shortcuts
         close_window = QShortcut(QKeySequence("Ctrl+W"), self)
@@ -825,6 +887,10 @@ class MainWindow(QMainWindow):
         # Add Ctrl+Enter to send message
         send_message = QShortcut(QKeySequence("Ctrl+Return"), self)
         send_message.activated.connect(self.run_agent)
+        
+        # Add Alt+V shortcut for voice control
+        voice_shortcut = QShortcut(QKeySequence("Alt+V"), self)
+        voice_shortcut.activated.connect(lambda: self.voice_button.click())
         
         # Allow tab for indentation
         self.input_area.setTabChangesFocus(False)
@@ -846,3 +912,39 @@ class MainWindow(QMainWindow):
             
         # For all other keys, use default handling
         QTextEdit.keyPressEvent(self.input_area, event)
+        
+    def mousePressEvent(self, event):
+        self.oldPos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        delta = QPoint(event.globalPosition().toPoint() - self.oldPos)
+        self.move(self.x() + delta.x(), self.y() + delta.y())
+        self.oldPos = event.globalPosition().toPoint()
+        
+    def closeEvent(self, event):
+        """Handle window close event - properly quit the application"""
+        self.quit_application()
+        event.accept()  # Allow the close
+        
+    def quit_application(self):
+        """Clean up resources and quit the application"""
+        # Stop any running agent
+        self.store.stop_run()
+        
+        # Clean up voice control
+        if hasattr(self, 'voice_controller'):
+            self.voice_controller.cleanup()
+        
+        # Save settings
+        self.settings.sync()
+        
+        # Hide tray icon before quitting
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+        
+        # Actually quit the application
+        QApplication.quit()
+
+    def show_prompt_dialog(self):
+        dialog = SystemPromptDialog(self, self.prompt_manager)
+        dialog.exec()

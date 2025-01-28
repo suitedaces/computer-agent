@@ -6,3 +6,7 @@ python-dotenv
 pillow
 numpy
 qtawesome
+SpeechRecognition
+pyttsx3
+keyboard
+pyaudio
