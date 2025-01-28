@@ -16,7 +16,7 @@ class VoiceController(QObject):
         self.is_listening = False
         self.is_processing = False  # Flag to track if we're processing a command
         self.listening_thread = None
-        self.wake_word = "hey nova"  # Wake word to activate voice control
+        self.wake_word = "hey grunty"  # Wake word to activate voice control
         
         # Configure text-to-speech
         self.engine.setProperty('rate', 150)  # Speed of speech
@@ -63,7 +63,7 @@ class VoiceController(QObject):
                 self.status_signal.emit(f"Heard: {text}")  # Debug what was heard
                 
                 # More flexible wake word detection
-                if any(text.startswith(word) for word in ["hey nova", "hey nora", "hi nova", "hi nora"]):
+                if any(text.startswith(word) for word in ["hey grunty", "hey gruny", "hi grunty", "hi gruny"]):
                     self.status_signal.emit("Wake word detected! Listening for command...")
                     audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
                     self.status_signal.emit("Processing command...")
@@ -107,7 +107,7 @@ class VoiceController(QObject):
             self.listening_thread = threading.Thread(target=self.voice_control_loop)
             self.listening_thread.daemon = True
             self.listening_thread.start()
-            self.status_signal.emit("Voice control activated - Say 'hey nova' to start")
+            self.status_signal.emit("Voice control activated - Say 'hey Grunty' to start")
             self.speak("Voice control activated")
         else:
             self.is_listening = False
