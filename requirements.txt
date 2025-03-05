@@ -1,12 +1,18 @@
+# Core dependencies
 PyQt6
 pyautogui
-requests
-anthropic
 python-dotenv
 pillow
 numpy
 qtawesome
-SpeechRecognition
-pyttsx3
-keyboard
-pyaudio
+requests
+
+# AI Provider dependencies
+anthropic>=0.15.0  # Required for Anthropic Claude
+openai>=1.17.0    # Optional for OpenAI support
+
+# Voice control dependencies (optional)
+SpeechRecognition  # Optional for voice input
+pyttsx3           # Optional for text-to-speech
+pyaudio           # Optional for voice recording
+keyboard          # For keyboard shortcuts

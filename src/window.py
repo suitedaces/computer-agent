@@ -1,11 +1,11 @@
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit, 
-                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar, QStatusBar)
+                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar, QStatusBar, QComboBox)
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QThread, QUrl, QSettings
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut, QAction, QTextCursor, QDesktopServices
 from .store import Store
 from .anthropic import AnthropicClient  
 from .voice_control import VoiceController
-from .prompt_manager import PromptManager
+from .prompt_manager import create_prompt_manager
 import logging
 import qtawesome as qta
 
@@ -24,16 +24,17 @@ class AgentThread(QThread):
         self.finished_signal.emit()
 
 class SystemPromptDialog(QDialog):
-    def __init__(self, parent=None, prompt_manager=None):
+    def __init__(self, parent=None, prompt_manager=None, provider_name=None):
         super().__init__(parent)
         self.prompt_manager = prompt_manager
-        self.setWindowTitle("Edit System Prompt")
+        self.provider_name = provider_name or "AI"
+        self.setWindowTitle(f"Edit {self.provider_name.capitalize()} System Prompt")
         self.setFixedSize(800, 600)
         
         layout = QVBoxLayout()
         
         # Description
-        desc_label = QLabel("Edit the system prompt that defines the agent's behavior. Be careful with changes as they may affect functionality.")
+        desc_label = QLabel(f"Edit the system prompt for {self.provider_name.capitalize()} models. Be careful with changes as they may affect functionality.")
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("color: #666; margin: 10px 0;")
         layout.addWidget(desc_label)
@@ -110,8 +111,8 @@ class MainWindow(QMainWindow):
     def __init__(self, store, anthropic_client):
         super().__init__()
         self.store = store
+        # Keep anthropic_client for backward compatibility 
         self.anthropic_client = anthropic_client
-        self.prompt_manager = PromptManager()
         
         # Initialize theme settings
         self.settings = QSettings('Grunty', 'Preferences')
@@ -128,7 +129,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Voice control ready")
         
         # Check if API key is missing
-        if self.store.error and "ANTHROPIC_API_KEY not found" in self.store.error:
+        if self.store.error and "API_KEY not found" in self.store.error:
             self.show_api_key_dialog()
         
         self.setWindowTitle("Grunty 👨💻")
@@ -208,7 +209,7 @@ class MainWindow(QMainWindow):
             
         # Save to .env file
         with open('.env', 'w') as f:
-            f.write(f'ANTHROPIC_API_KEY={api_key}')
+            f.write(f'API_KEY={api_key}')
             
         # Reinitialize the store and anthropic client
         self.store = Store()
@@ -216,74 +217,107 @@ class MainWindow(QMainWindow):
         dialog.accept()
 
     def setup_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Create main layout
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        central_widget.setLayout(main_layout)
-        
-        # Container widget for rounded corners
-        self.container = QWidget()  # Make it an instance variable
+        # Main container with padding
+        self.container = QWidget()
         self.container.setObjectName("container")
-        container_layout = QVBoxLayout()
-        container_layout.setSpacing(0)  # Remove spacing between elements
-        self.container.setLayout(container_layout)
         
-        # Create title bar
-        title_bar = QWidget()
-        title_bar.setObjectName("titleBar")
-        title_bar_layout = QHBoxLayout(title_bar)
-        title_bar_layout.setContentsMargins(10, 5, 10, 5)
+        self.setCentralWidget(self.container)
         
-        # Add Grunty title with robot emoji
-        title_label = QLabel("Grunty 🤖")
+        # Main layout
+        main_layout = QVBoxLayout(self.container)
+        main_layout.setContentsMargins(10, 10, 10, 10)  # Padding inside the window
+        
+        # Header
+        header_layout = QHBoxLayout()
+        
+        # App title and info
+        title_layout = QVBoxLayout()
+        title_label = QLabel("Grunty")
         title_label.setObjectName("titleLabel")
-        title_bar_layout.addWidget(title_label)
+        subtitle_label = QLabel("AI Computer Control")
+        subtitle_label.setObjectName("subtitleLabel")
+        title_layout.addWidget(title_label)
+        title_layout.addWidget(subtitle_label)
         
-        # Add File Menu
-        file_menu = QMenu("File")
-        new_task_action = QAction("New Task", self)
-        new_task_action.setShortcut("Ctrl+N")
-        edit_prompt_action = QAction("Edit System Prompt", self)
-        edit_prompt_action.setShortcut("Ctrl+E")
-        edit_prompt_action.triggered.connect(self.show_prompt_dialog)
-        quit_action = QAction("Quit", self)
-        quit_action.setShortcut("Ctrl+Q")
-        quit_action.triggered.connect(self.quit_application)
-        file_menu.addAction(new_task_action)
-        file_menu.addAction(edit_prompt_action)
-        file_menu.addSeparator()
-        file_menu.addAction(quit_action)
+        # Add AI Provider/Model selector
+        ai_selector_layout = QHBoxLayout()
         
-        file_button = QPushButton("File")
-        file_button.setObjectName("menuButton")
-        file_button.clicked.connect(lambda: file_menu.exec(file_button.mapToGlobal(QPoint(0, file_button.height()))))
-        title_bar_layout.addWidget(file_button)
+        # Provider dropdown
+        provider_layout = QVBoxLayout()
+        provider_label = QLabel("AI Provider:")
+        provider_label.setObjectName("selectorLabel")
+        self.provider_dropdown = QComboBox()
+        self.provider_dropdown.setObjectName("providerDropdown")
+        self.provider_dropdown.addItems(self.store.get_available_providers())
+        self.provider_dropdown.setCurrentText(self.store.current_provider_name)
+        self.provider_dropdown.currentTextChanged.connect(self.change_provider)
+        provider_layout.addWidget(provider_label)
+        provider_layout.addWidget(self.provider_dropdown)
         
-        # Add spacer to push remaining items to the right
-        title_bar_layout.addStretch()
+        # Model dropdown
+        model_layout = QVBoxLayout()
+        model_label = QLabel("Model:")
+        model_label.setObjectName("selectorLabel") 
+        self.model_dropdown = QComboBox()
+        self.model_dropdown.setObjectName("modelDropdown")
+        self.update_model_dropdown()
+        self.model_dropdown.currentTextChanged.connect(self.change_model)
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(self.model_dropdown)
         
-        # Theme toggle button
-        self.theme_button = QPushButton()
-        self.theme_button.setObjectName("titleBarButton")
-        self.theme_button.clicked.connect(self.toggle_theme)
-        self.update_theme_button()
-        title_bar_layout.addWidget(self.theme_button)
+        ai_selector_layout.addLayout(provider_layout)
+        ai_selector_layout.addLayout(model_layout)
         
-        # Minimize and close buttons
-        minimize_button = QPushButton("−")
-        minimize_button.setObjectName("titleBarButton")
-        minimize_button.clicked.connect(self.showMinimized)
-        title_bar_layout.addWidget(minimize_button)
+        # Settings button
+        self.settings_btn = QPushButton()
+        self.settings_btn.setIcon(qta.icon('fa5s.cog'))
+        self.settings_btn.setObjectName("iconButton")
+        self.settings_btn.setToolTip("Settings")
+        self.settings_btn.clicked.connect(self.show_settings_menu)
         
-        close_button = QPushButton("×")
-        close_button.setObjectName("titleBarButton")
-        close_button.clicked.connect(self.close)
-        title_bar_layout.addWidget(close_button)
+        # Buttons layout
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
         
-        container_layout.addWidget(title_bar)
+        # Voice control button (mic icon)
+        self.voice_btn = QPushButton()
+        self.voice_btn.setIcon(qta.icon('fa5s.microphone'))
+        self.voice_btn.setCheckable(True)
+        self.voice_btn.setObjectName("iconButton")
+        self.voice_btn.setToolTip("Voice Control (Experimental)")
+        self.voice_btn.clicked.connect(self.toggle_voice_control)
+        buttons_layout.addWidget(self.voice_btn)
+        
+        self.theme_btn = QPushButton()
+        self.theme_btn.setIcon(qta.icon('fa5s.moon' if self.dark_mode else 'fa5s.sun'))
+        self.theme_btn.setObjectName("iconButton")
+        self.theme_btn.setToolTip("Toggle Light/Dark Mode")
+        self.theme_btn.clicked.connect(self.toggle_theme)
+        buttons_layout.addWidget(self.theme_btn)
+        
+        # Settings button
+        buttons_layout.addWidget(self.settings_btn)
+        
+        # Minimize button
+        min_btn = QPushButton()
+        min_btn.setIcon(qta.icon('fa5s.window-minimize'))
+        min_btn.setObjectName("titlebarButton")
+        min_btn.clicked.connect(self.showMinimized)
+        buttons_layout.addWidget(min_btn)
+        
+        # Close button
+        close_btn = QPushButton()
+        close_btn.setIcon(qta.icon('fa5s.times'))
+        close_btn.setObjectName("titlebarButton")
+        close_btn.clicked.connect(self.minimize_to_tray)
+        buttons_layout.addWidget(close_btn)
+        
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
+        header_layout.addLayout(buttons_layout)
+        
+        main_layout.addLayout(header_layout)
+        main_layout.addLayout(ai_selector_layout)
         
         # Action log with modern styling
         self.action_log = QTextEdit()
@@ -299,7 +333,7 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
             }
         """)
-        container_layout.addWidget(self.action_log, stretch=1)  # Give it flexible space
+        main_layout.addWidget(self.action_log, stretch=1)  # Give it flexible space
         
         # Progress bar - Now above input area
         self.progress_bar = QProgressBar()
@@ -317,7 +351,7 @@ class MainWindow(QMainWindow):
             }
         """)
         self.progress_bar.hide()
-        container_layout.addWidget(self.progress_bar)
+        main_layout.addWidget(self.progress_bar)
 
         # Input section container - Fixed height at bottom
         input_section = QWidget()
@@ -442,21 +476,18 @@ class MainWindow(QMainWindow):
         input_layout.addLayout(control_layout)
 
         # Add input section to main container
-        container_layout.addWidget(input_section)
+        main_layout.addWidget(input_section)
 
-        # Add the container to the main layout
-        main_layout.addWidget(self.container)
-        
         # Apply theme after all widgets are set up
         self.apply_theme()
         
     def update_theme_button(self):
         if self.dark_mode:
-            self.theme_button.setIcon(qta.icon('fa5s.sun', color='white'))
-            self.theme_button.setToolTip("Switch to Light Mode")
+            self.theme_btn.setIcon(qta.icon('fa5s.sun', color='white'))
+            self.theme_btn.setToolTip("Switch to Light Mode")
         else:
-            self.theme_button.setIcon(qta.icon('fa5s.moon', color='black'))
-            self.theme_button.setToolTip("Switch to Dark Mode")
+            self.theme_btn.setIcon(qta.icon('fa5s.moon', color='black'))
+            self.theme_btn.setToolTip("Switch to Dark Mode")
 
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
@@ -555,17 +586,28 @@ class MainWindow(QMainWindow):
         """
 
         # Apply to all window control buttons
-        for button in [self.theme_button, 
-                      self.findChild(QPushButton, "menuButton"),
-                      self.findChild(QPushButton, "titleBarButton")]:
+        for button in [self.theme_btn, 
+                       self.settings_btn,   # Replace with actual button references
+                       self.voice_btn]:     # instead of findChild which might fail
             if button:
-                button.setStyleSheet(window_control_style)
-
+                button.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {colors['button_bg']};
+                        color: {colors['button_text']};
+                        border: none;
+                        border-radius: 4px;
+                        padding: 8px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {colors['button_hover']};
+                    }}
+                """)
+        
         # Update theme button icon
         if self.dark_mode:
-            self.theme_button.setIcon(qta.icon('fa5s.sun', color=colors['button_text']))
+            self.theme_btn.setIcon(qta.icon('fa5s.sun', color=colors['button_text']))
         else:
-            self.theme_button.setIcon(qta.icon('fa5s.moon', color=colors['button_text']))
+            self.theme_btn.setIcon(qta.icon('fa5s.moon', color=colors['button_text']))
 
         # Update tray menu style if needed
         if hasattr(self, 'tray_icon') and self.tray_icon.contextMenu():
@@ -672,6 +714,17 @@ class MainWindow(QMainWindow):
             self.raise_()
             self.activateWindow()
 
+    def minimize_to_tray(self):
+        """Minimize the window to the system tray."""
+        self.hide()
+        # Show a notification
+        self.tray_icon.showMessage(
+            "Grunty is still running",
+            "The application is minimized to the system tray.",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000
+        )
+    
     def run_agent(self):
         instructions = self.input_area.toPlainText()
         if not instructions:
@@ -837,6 +890,26 @@ class MainWindow(QMainWindow):
             self.action_log.verticalScrollBar().maximum()
         )
         
+    def log(self, message: str):
+        """Log a message to the log area.
+        
+        Args:
+            message: Message to log
+        """
+        if hasattr(self, 'action_log'):
+            import datetime
+            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+            log_message = f"[{timestamp}] {message}"
+            
+            # Add message to log area
+            if self.action_log.toPlainText():
+                self.action_log.append(log_message)
+            else:
+                self.action_log.setPlainText(log_message)
+        else:
+            # Fallback to console logging if action_log doesn't exist
+            logging.info(f"UI Log: {message}")
+        
     def handle_voice_input(self, text):
         """Handle voice input by setting it in the input area and running the agent"""
         self.input_area.setText(text)
@@ -946,5 +1019,110 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def show_prompt_dialog(self):
-        dialog = SystemPromptDialog(self, self.prompt_manager)
+        # Get the current provider
+        provider_name = self.provider_dropdown.currentText().lower()
+        
+        # Create a prompt manager instance for the current provider
+        prompt_manager = self.store.get_prompt_manager(provider_name)
+        
+        # Show dialog
+        dialog = SystemPromptDialog(self, prompt_manager, provider_name)
         dialog.exec()
+    
+    def show_settings_menu(self):
+        """Show the settings menu when the settings button is clicked."""
+        # Create a menu
+        menu = QMenu(self)
+        
+        # Add system prompt action
+        prompt_action = QAction("Edit System Prompt", self)
+        prompt_action.triggered.connect(self.show_prompt_dialog)
+        menu.addAction(prompt_action)
+        
+        # Add a separator
+        menu.addSeparator()
+        
+        # Add about action
+        about_action = QAction("About Grunty", self)
+        about_action.triggered.connect(lambda: QMessageBox.about(self, "About Grunty", 
+                                                             "Grunty v1.0\nAI Computer Control\n\nAllows AI to control your computer."))
+        menu.addAction(about_action)
+        
+        # Show the menu at the button's position
+        menu.exec(self.settings_btn.mapToGlobal(QPoint(0, self.settings_btn.height())))
+    
+    # Update the model dropdown with models from the current provider.
+    def update_model_dropdown(self):
+        """Update the model dropdown with models from the current provider."""
+        current_provider = self.provider_dropdown.currentText()
+        self.model_dropdown.clear()
+        
+        models = self.store.get_available_models(current_provider)
+        model_names = [f"{model['name']}" for model in models]
+        model_ids = [model['id'] for model in models]
+        
+        self.model_dropdown.addItems(model_names)
+        
+        # Store model IDs as user data
+        for i, model_id in enumerate(model_ids):
+            self.model_dropdown.setItemData(i, model_id)
+        
+        # Select the current model if it exists
+        if self.store.current_model_id:
+            for i in range(self.model_dropdown.count()):
+                if self.model_dropdown.itemData(i) == self.store.current_model_id:
+                    self.model_dropdown.setCurrentIndex(i)
+                    break
+    
+    def change_provider(self, provider_name):
+        """Change the AI provider."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            logger.info(f"Attempting to change AI provider to {provider_name}")
+            
+            if provider_name != self.store.current_provider_name:
+                logger.info(f"Current provider is {self.store.current_provider_name}, changing to {provider_name}")
+                
+                if self.store.set_ai_provider(provider_name):
+                    logger.info(f"Successfully changed provider to {provider_name}")
+                    self.update_model_dropdown()
+                    self.log(f"AI provider changed to {provider_name}")
+                else:
+                    logger.error(f"Failed to change AI provider: {self.store.error}")
+                    self.log(f"Failed to change AI provider: {self.store.error}")
+                    # Show error message box
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.critical(self, "Provider Change Error", 
+                                      f"Failed to change AI provider to {provider_name}.\n\nReason: {self.store.error}")
+                    # Revert selection
+                    self.provider_dropdown.setCurrentText(self.store.current_provider_name)
+            else:
+                logger.info(f"Provider {provider_name} already selected, no change needed")
+        except Exception as e:
+            import traceback
+            logger.error(f"Exception when changing provider: {str(e)}\n{traceback.format_exc()}")
+            self.log(f"Error changing provider: {str(e)}")
+            # Show error message box
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Provider Change Error", 
+                             f"An error occurred when changing to {provider_name}.\n\nError: {str(e)}")
+            # Revert selection
+            self.provider_dropdown.setCurrentText(self.store.current_provider_name)
+    
+    def change_model(self, model_name):
+        """Change the model for the current provider."""
+        current_index = self.model_dropdown.currentIndex()
+        if current_index >= 0:
+            model_id = self.model_dropdown.itemData(current_index)
+            if self.store.current_model_id != model_id:
+                if self.store.set_ai_provider(self.store.current_provider_name, model_id):
+                    self.log(f"Model changed to {model_name} ({model_id})")
+                else:
+                    self.log(f"Failed to change model: {self.store.error}")
+                    # Find and select the current model
+                    for i in range(self.model_dropdown.count()):
+                        if self.model_dropdown.itemData(i) == self.store.current_model_id:
+                            self.model_dropdown.setCurrentIndex(i)
+                            break
