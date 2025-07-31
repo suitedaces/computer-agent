@@ -1,7 +1,6 @@
-from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit, 
-                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar, QStatusBar)
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QThread, QUrl, QSettings
-from PyQt6.QtGui import QFont, QKeySequence, QShortcut, QAction, QTextCursor, QDesktopServices
+from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit, QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QStatusBar
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QThread, QSettings
+from PyQt6.QtGui import QKeySequence, QShortcut, QAction
 from .store import Store
 from .anthropic import AnthropicClient  
 from .voice_control import VoiceController
@@ -379,7 +378,7 @@ class MainWindow(QMainWindow):
                         color: white;
                         border: none;
                         border-radius: 8px;
-                        padding: 0 24px;
+                        padding: 0 20px;
                         font-family: Inter;
                         font-size: 14px;
                         font-weight: bold;
@@ -399,7 +398,7 @@ class MainWindow(QMainWindow):
                         color: white;
                         border: none;
                         border-radius: 8px;
-                        padding: 0 24px;
+                        padding: 0 20px;
                         font-family: Inter;
                         font-size: 14px;
                         font-weight: bold;
@@ -423,7 +422,7 @@ class MainWindow(QMainWindow):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 0 24px;
+                padding: 0 20px;
                 font-family: Inter;
                 font-size: 14px;
                 font-weight: bold;
