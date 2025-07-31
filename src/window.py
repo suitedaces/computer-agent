@@ -273,15 +273,15 @@ class MainWindow(QMainWindow):
         title_bar_layout.addWidget(self.theme_button)
         
         # Minimize and close buttons
-        minimize_button = QPushButton("−")
-        minimize_button.setObjectName("titleBarButton")
-        minimize_button.clicked.connect(self.showMinimized)
-        title_bar_layout.addWidget(minimize_button)
+        self.minimize_button = QPushButton("−")
+        self.minimize_button.setObjectName("titleBarButton")
+        self.minimize_button.clicked.connect(self.showMinimized)
+        title_bar_layout.addWidget(self.minimize_button)
         
-        close_button = QPushButton("×")
-        close_button.setObjectName("titleBarButton")
-        close_button.clicked.connect(self.close)
-        title_bar_layout.addWidget(close_button)
+        self.close_button = QPushButton("×")
+        self.close_button.setObjectName("titleBarButton")
+        self.close_button.clicked.connect(self.close)
+        title_bar_layout.addWidget(self.close_button)
         
         container_layout.addWidget(title_bar)
         
@@ -556,8 +556,9 @@ class MainWindow(QMainWindow):
 
         # Apply to all window control buttons
         for button in [self.theme_button, 
-                      self.findChild(QPushButton, "menuButton"),
-                      self.findChild(QPushButton, "titleBarButton")]:
+                       self.findChild(QPushButton, "menuButton"),
+                       self.minimize_button,
+                       self.close_button]:
             if button:
                 button.setStyleSheet(window_control_style)
 
