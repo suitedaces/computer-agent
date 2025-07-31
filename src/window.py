@@ -1,7 +1,6 @@
-from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit, 
-                             QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QMenuBar, QStatusBar)
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QThread, QUrl, QSettings
-from PyQt6.QtGui import QFont, QKeySequence, QShortcut, QAction, QTextCursor, QDesktopServices
+from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit, QPushButton, QLabel, QProgressBar, QSystemTrayIcon, QMenu, QApplication, QDialog, QLineEdit, QStatusBar
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QThread, QSettings
+from PyQt6.QtGui import QKeySequence, QShortcut, QAction
 from .store import Store
 from .anthropic import AnthropicClient  
 from .voice_control import VoiceController
@@ -273,15 +272,15 @@ class MainWindow(QMainWindow):
         title_bar_layout.addWidget(self.theme_button)
         
         # Minimize and close buttons
-        minimize_button = QPushButton("−")
-        minimize_button.setObjectName("titleBarButton")
-        minimize_button.clicked.connect(self.showMinimized)
-        title_bar_layout.addWidget(minimize_button)
+        self.minimize_button = QPushButton("−")
+        self.minimize_button.setObjectName("titleBarButton")
+        self.minimize_button.clicked.connect(self.showMinimized)
+        title_bar_layout.addWidget(self.minimize_button)
         
-        close_button = QPushButton("×")
-        close_button.setObjectName("titleBarButton")
-        close_button.clicked.connect(self.close)
-        title_bar_layout.addWidget(close_button)
+        self.close_button = QPushButton("×")
+        self.close_button.setObjectName("titleBarButton")
+        self.close_button.clicked.connect(self.close)
+        title_bar_layout.addWidget(self.close_button)
         
         container_layout.addWidget(title_bar)
         
@@ -379,7 +378,7 @@ class MainWindow(QMainWindow):
                         color: white;
                         border: none;
                         border-radius: 8px;
-                        padding: 0 24px;
+                        padding: 0 20px;
                         font-family: Inter;
                         font-size: 14px;
                         font-weight: bold;
@@ -399,7 +398,7 @@ class MainWindow(QMainWindow):
                         color: white;
                         border: none;
                         border-radius: 8px;
-                        padding: 0 24px;
+                        padding: 0 20px;
                         font-family: Inter;
                         font-size: 14px;
                         font-weight: bold;
@@ -423,7 +422,7 @@ class MainWindow(QMainWindow):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 0 24px;
+                padding: 0 20px;
                 font-family: Inter;
                 font-size: 14px;
                 font-weight: bold;
@@ -556,8 +555,9 @@ class MainWindow(QMainWindow):
 
         # Apply to all window control buttons
         for button in [self.theme_button, 
-                      self.findChild(QPushButton, "menuButton"),
-                      self.findChild(QPushButton, "titleBarButton")]:
+                       self.findChild(QPushButton, "menuButton"),
+                       self.minimize_button,
+                       self.close_button]:
             if button:
                 button.setStyleSheet(window_control_style)
 
