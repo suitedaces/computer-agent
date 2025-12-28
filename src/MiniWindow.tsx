@@ -169,8 +169,31 @@ export default function MiniWindow() {
     };
   }, []);
 
+  const handleOpenMain = async () => {
+    try {
+      await invoke("show_main_window");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   if (!isRunning) {
-    return null;
+    return (
+      <div className="h-screen w-screen flex items-start justify-start p-2">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9, y: -10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          onClick={handleOpenMain}
+          className="mini-feed cursor-pointer hover:border-white/20 transition-colors"
+          style={{ maxHeight: 'auto' }}
+        >
+          <div className="flex items-center gap-2 px-3 py-2.5">
+            <span className="w-2 h-2 rounded-full bg-white/30" />
+            <span className="text-[10px] text-white/40">idle</span>
+          </div>
+        </motion.div>
+      </div>
+    );
   }
 
   return (

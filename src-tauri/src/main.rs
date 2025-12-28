@@ -166,6 +166,32 @@ fn hide_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // hide mini first
+        if let Ok(mini_panel) = app_handle.get_webview_panel("mini") {
+            mini_panel.hide();
+        }
+        // show main
+        if let Ok(panel) = app_handle.get_webview_panel("main") {
+            panel.show_and_make_key();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(mini) = app_handle.get_webview_window("mini") {
+            let _ = mini.hide();
+        }
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     // load .env
     if dotenvy::dotenv().is_err() {
@@ -306,18 +332,16 @@ fn main() {
                                 if main_panel.is_visible() {
                                     println!("[tray] hiding main panel");
                                     main_panel.hide();
-                                    // show mini if agent is running
-                                    if is_running {
-                                        println!("[tray] showing mini panel");
-                                        if let Ok(mini_panel) = app.get_webview_panel("mini") {
-                                            if let Some(mini_window) = app.get_webview_window("mini") {
-                                                if let Ok(size) = mini_window.outer_size() {
-                                                    let x = tray_x - (size.width as i32 / 2);
-                                                    let _ = mini_window.set_position(PhysicalPosition::new(x, tray_bottom));
-                                                }
+                                    // always show mini when main is hidden
+                                    println!("[tray] showing mini panel");
+                                    if let Ok(mini_panel) = app.get_webview_panel("mini") {
+                                        if let Some(mini_window) = app.get_webview_window("mini") {
+                                            if let Ok(size) = mini_window.outer_size() {
+                                                let x = tray_x - (size.width as i32 / 2);
+                                                let _ = mini_window.set_position(PhysicalPosition::new(x, tray_bottom));
                                             }
-                                            mini_panel.show();
                                         }
+                                        mini_panel.show();
                                     }
                                 } else {
                                     // hide mini, show main
@@ -381,6 +405,7 @@ fn main() {
             get_mcp_tools,
             show_mini_window,
             hide_mini_window,
+            show_main_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
