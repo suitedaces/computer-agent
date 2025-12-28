@@ -42,8 +42,7 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
-# macos window level
+# macos panel support
 [target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.26"
-objc = "0.2"
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 

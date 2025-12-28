@@ -14,32 +14,22 @@ use tauri::{
 use tauri_plugin_positioner::{Position, WindowExt};
 
 #[cfg(target_os = "macos")]
-use cocoa::appkit::{NSWindow, NSWindowCollectionBehavior};
+use tauri_nspanel::{
+    tauri_panel, CollectionBehavior, ManagerExt, PanelLevel, StyleMask, WebviewWindowExt,
+};
+
 #[cfg(target_os = "macos")]
-use cocoa::base::id;
+tauri_panel! {
+    panel!(GruntyPanel {
+        config: {
+            can_become_key_window: true,
+            is_floating_panel: true
+        }
+    })
+}
 
 struct AppState {
     agent: Arc<Mutex<Agent>>,
-}
-
-#[cfg(target_os = "macos")]
-fn set_window_level(window: &tauri::WebviewWindow) {
-    if let Ok(ns_window) = window.ns_window() {
-        unsafe {
-            let ns_win = ns_window as id;
-            // NSPopUpMenuWindowLevel (101) works for fullscreen, but let's try NSFloatingWindowLevel + 1
-            // Actually for menubar apps, we want to appear BELOW the menubar but above fullscreen
-            // NSFloatingWindowLevel = 3, NSModalPanelWindowLevel = 8
-            // Trying level 3 (floating) which should work with fullscreen auxiliary behavior
-            ns_win.setLevel_(3);
-            // allow window to appear on all spaces including fullscreen
-            ns_win.setCollectionBehavior_(
-                NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
-                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
-                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary,
-            );
-        }
-    }
 }
 
 #[tauri::command]
@@ -117,9 +107,16 @@ fn main() {
         agent.set_api_key(key);
     }
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_positioner::init());
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_nspanel::init());
+    }
+
+    builder
         .manage(AppState {
             agent: Arc::new(Mutex::new(agent)),
         })
@@ -127,10 +124,21 @@ fn main() {
             // hide from dock - menubar app only
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // set window level to appear above fullscreen apps
+            // convert window to panel for fullscreen support
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
-                set_window_level(&window);
+                if let Ok(panel) = window.to_panel::<GruntyPanel>() {
+                    panel.set_level(PanelLevel::Floating.value());
+                    panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                    panel.set_collection_behavior(
+                        CollectionBehavior::new()
+                            .full_screen_auxiliary()
+                            .can_join_all_spaces()
+                            .stationary()
+                            .into(),
+                    );
+                    panel.set_hides_on_deactivate(false);
+                }
             }
 
             // create tray icon
@@ -148,6 +156,18 @@ fn main() {
                     } = event
                     {
                         let app = tray.app_handle();
+                        #[cfg(target_os = "macos")]
+                        if let Ok(panel) = app.get_webview_panel("main") {
+                            if panel.is_visible() {
+                                panel.hide();
+                            } else {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.move_window(Position::TrayBottomCenter);
+                                }
+                                panel.show_and_make_key();
+                            }
+                        }
+                        #[cfg(not(target_os = "macos"))]
                         if let Some(window) = app.get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
