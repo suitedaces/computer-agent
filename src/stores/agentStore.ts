@@ -12,6 +12,7 @@ function toPastTense(text: string): string {
     [/^Typing:/, "Typed:"],
     [/^Pressing key:/, "Pressed key:"],
     [/^Scrolling/, "Scrolled"],
+    [/^Waiting$/, "Waited"],
     [/^\$ /, "$ "],  // bash commands stay the same
   ];
 

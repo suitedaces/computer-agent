@@ -292,7 +292,7 @@ impl ComputerControl {
             }
 
             "wait" => {
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(std::time::Duration::from_secs(1));
                 Ok(None)
             }
 

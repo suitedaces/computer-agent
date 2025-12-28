@@ -491,6 +491,7 @@ fn format_action(action: &ComputerAction) -> String {
             let dir = action.scroll_direction.as_deref().unwrap_or("down");
             format!("Scrolling {}", dir)
         }
+        "wait" => "Waiting".to_string(),
         _ => format!("Action: {}", action.action),
     }
 }
