@@ -28,7 +28,7 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mr-4"
+      className=""
     >
       <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#30363d]">
         {/* command with inline status */}
@@ -110,13 +110,13 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   const getBubbleStyle = () => {
     if (isUser) {
-      return "bg-blue-500/30 border-blue-400/30 ml-8 px-3 py-2 rounded-2xl border backdrop-blur-sm";
+      return "bg-blue-500/30 border-blue-400/30 px-3 py-2 rounded-2xl border backdrop-blur-sm";
     }
     switch (msg.type) {
       case "error":
-        return "bg-red-500/20 border-red-400/30 mr-8 px-3 py-2 rounded-2xl border backdrop-blur-sm";
+        return "bg-red-500/20 border-red-400/30 px-3 py-2 rounded-2xl border backdrop-blur-sm";
       default:
-        return "mr-8";
+        return "";
     }
   };
 
@@ -130,7 +130,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       animate={{ opacity: 1, y: 0 }}
       className={`flex ${isUser ? "justify-end" : "justify-start"}`}
     >
-      <div className={`max-w-[85%] ${getBubbleStyle()}`}>
+      <div className={getBubbleStyle()}>
         <div className="flex items-start gap-2">
           {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
           {msg.type === "thinking" ? (
@@ -138,7 +138,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               <Streamdown isAnimating={false}>{msg.content}</Streamdown>
             </div>
           ) : (
-            <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
+            <p className={`text-[13px] leading-relaxed break-words ${isAction ? (msg.pending ? "text-white/50 italic" : "text-white/50") : "text-white/90"}`}>
               {showSweep && <span className="sweep-text">{msg.content}</span>}
               {isAction && !showSweep && msg.content}
               {!isAction && msg.content}
@@ -231,7 +231,7 @@ function StreamingBubble() {
       animate={{ opacity: 1, y: 0 }}
       className="flex justify-start"
     >
-      <div className="max-w-[85%] mr-8">
+      <div>
         <div className="text-[13px] leading-relaxed text-white/90 prose prose-invert prose-sm max-w-none">
           <Streamdown isAnimating={isRunning}>{streamingText}</Streamdown>
         </div>
@@ -242,7 +242,7 @@ function StreamingBubble() {
 
 export default function App() {
   const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, streamingText } = useAgentStore();
-  const { toggle, submit } = useAgent();
+  const { toggle, submit, stop } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -257,6 +257,17 @@ export default function App() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // esc to stop
+  useEffect(() => {
+    const handleEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape" && isRunning) {
+        stop();
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [isRunning, stop]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {

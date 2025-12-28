@@ -122,7 +122,7 @@ export function useAgent() {
     try {
       await invoke("stop_agent");
       setIsRunning(false);
-      addMessage({ role: "assistant", content: "Stopped", type: "info" });
+      addMessage({ role: "assistant", content: "Interrupted", type: "error" });
     } catch (e) {
       console.error(e);
     }
