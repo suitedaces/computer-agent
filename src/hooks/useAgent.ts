@@ -8,6 +8,7 @@ export function useAgent() {
   const {
     isRunning,
     inputText,
+    selectedModel,
     setIsRunning,
     addMessage,
     markLastActionComplete,
@@ -98,12 +99,12 @@ export function useAgent() {
     setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text });
+      await invoke("run_agent", { instructions: text, model: selectedModel });
     } catch (error) {
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, addMessage, setInputText, setIsRunning]);
+  }, [inputText, isRunning, selectedModel, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {

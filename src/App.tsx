@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAgentStore } from "./stores/agentStore";
 import { useAgent } from "./hooks/useAgent";
-import { ChatMessage } from "./types";
+import { ChatMessage, ModelId } from "./types";
 import {
   Send,
   Square,
@@ -15,7 +15,6 @@ import {
   Monitor,
   ChevronDown,
   ChevronUp,
-  Terminal,
 } from "lucide-react";
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
@@ -195,7 +194,7 @@ function ScreenPreview({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
             >
               <div className="rounded-lg overflow-hidden bg-black/40">
                 <img
-                  src={`data:image/png;base64,${screenshot}`}
+                  src={`data:image/jpeg;base64,${screenshot}`}
                   alt="Screen"
                   className="w-full h-auto"
                 />
@@ -208,8 +207,14 @@ function ScreenPreview({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
   );
 }
 
+const MODELS: { id: ModelId; label: string }[] = [
+  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+  { id: "claude-sonnet-4-5-20250514", label: "Sonnet 4.5" },
+  { id: "claude-opus-4-5-20250514", label: "Opus 4.5" },
+];
+
 export default function App() {
-  const { messages, isRunning, inputText, setInputText } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel } = useAgentStore();
   const { toggle, submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -242,10 +247,22 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-black/85 backdrop-blur-2xl overflow-hidden rounded-xl">
       {/* titlebar */}
-      <div className="titlebar h-11 flex items-center justify-center border-b border-white/5 shrink-0">
+      <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
         <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">
           taskhomie
         </span>
+        <select
+          value={selectedModel}
+          onChange={(e) => setSelectedModel(e.target.value as ModelId)}
+          disabled={isRunning}
+          className="bg-white/5 border border-white/10 rounded-md px-2 py-1 text-[10px] text-white/60 focus:outline-none focus:border-white/20 disabled:opacity-50"
+        >
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id} className="bg-black text-white">
+              {m.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* messages */}

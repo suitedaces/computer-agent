@@ -42,6 +42,9 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
+# allocator
+mimalloc = "0.1"
+
 # macos panel support
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }

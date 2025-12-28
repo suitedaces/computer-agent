@@ -29,12 +29,15 @@ export interface ChatMessage {
   exitCode?: number;
 }
 
+export type ModelId = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5-20250514" | "claude-opus-4-5-20250514";
+
 export interface AgentState {
   isRunning: boolean;
   messages: ChatMessage[];
   screenshot: string | null;
   apiKeySet: boolean;
   inputText: string;
+  selectedModel: ModelId;
 
   setIsRunning: (running: boolean) => void;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
@@ -43,5 +46,6 @@ export interface AgentState {
   setScreenshot: (screenshot: string | null) => void;
   setApiKeySet: (set: boolean) => void;
   setInputText: (text: string) => void;
+  setSelectedModel: (model: ModelId) => void;
   clearMessages: () => void;
 }

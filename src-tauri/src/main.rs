@@ -1,5 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 mod agent;
 mod api;
 mod bash;
@@ -50,10 +55,11 @@ async fn check_api_key(state: State<'_, AppState>) -> Result<bool, String> {
 #[tauri::command]
 async fn run_agent(
     instructions: String,
+    model: String,
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[taskhomie] run_agent called with: {}", instructions);
+    println!("[taskhomie] run_agent called with: {} (model: {})", instructions, model);
 
     let agent = state.agent.clone();
 
@@ -69,7 +75,7 @@ async fn run_agent(
 
     tokio::spawn(async move {
         let agent_guard = agent.lock().await;
-        match agent_guard.run(instructions, app_handle).await {
+        match agent_guard.run(instructions, model, app_handle).await {
             Ok(_) => println!("[taskhomie] Agent finished"),
             Err(e) => println!("[taskhomie] Agent error: {:?}", e),
         }

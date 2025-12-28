@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { AgentState } from "../types";
+import { AgentState, ModelId } from "../types";
 
 function toPastTense(text: string): string {
   const replacements: [RegExp, string][] = [
@@ -29,6 +29,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   screenshot: null,
   apiKeySet: false,
   inputText: "",
+  selectedModel: "claude-sonnet-4-5-20250514" as ModelId,
 
   setIsRunning: (running) => set({ isRunning: running }),
 
@@ -75,6 +76,8 @@ export const useAgentStore = create<AgentState>((set) => ({
   setApiKeySet: (apiKeySet) => set({ apiKeySet }),
 
   setInputText: (inputText) => set({ inputText }),
+
+  setSelectedModel: (selectedModel) => set({ selectedModel }),
 
   clearMessages: () => set({ messages: [] }),
 }));

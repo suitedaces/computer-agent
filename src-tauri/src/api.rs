@@ -5,7 +5,6 @@ use thiserror::Error;
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const BETA_HEADER: &str = "computer-use-2025-01-24";
 const API_VERSION: &str = "2023-06-01";
-const MODEL: &str = "claude-sonnet-4-5";
 const DISPLAY_WIDTH: u32 = 1280;
 const DISPLAY_HEIGHT: u32 = 800;
 
@@ -92,13 +91,15 @@ struct ApiErrorDetail {
 pub struct AnthropicClient {
     client: Client,
     api_key: String,
+    model: String,
 }
 
 impl AnthropicClient {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String, model: String) -> Self {
         Self {
             client: Client::new(),
             api_key,
+            model,
         }
     }
 
@@ -139,7 +140,7 @@ impl AnthropicClient {
         ];
 
         let request = ApiRequest {
-            model: MODEL.to_string(),
+            model: self.model.clone(),
             max_tokens: 4096,
             system: SYSTEM_PROMPT.to_string(),
             tools,

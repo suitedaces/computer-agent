@@ -38,8 +38,8 @@ pub struct ComputerAction {
 }
 
 pub struct ComputerControl {
-    screen_width: u32,
-    screen_height: u32,
+    pub screen_width: u32,
+    pub screen_height: u32,
 }
 
 impl ComputerControl {
@@ -56,6 +56,10 @@ impl ComputerControl {
         })
     }
 
+    pub fn with_dimensions(screen_width: u32, screen_height: u32) -> Self {
+        Self { screen_width, screen_height }
+    }
+
     pub fn take_screenshot(&self) -> Result<String, ComputerError> {
         let monitor = Monitor::all()
             .map_err(|e| ComputerError::Screenshot(e.to_string()))?
@@ -67,13 +71,14 @@ impl ComputerControl {
             .capture_image()
             .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
 
-        // resize to AI space
+        // resize to AI space - use Triangle filter (fast, good enough for screenshots)
         let resized = DynamicImage::ImageRgba8(image)
-            .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Lanczos3);
+            .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Triangle);
 
+        // encode as JPEG (much faster than PNG, still good quality)
         let mut buffer = Vec::new();
         resized
-            .write_to(&mut Cursor::new(&mut buffer), image::ImageFormat::Png)
+            .write_to(&mut Cursor::new(&mut buffer), image::ImageFormat::Jpeg)
             .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
 
         Ok(BASE64.encode(&buffer))

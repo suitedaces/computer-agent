@@ -70,9 +70,10 @@ impl Agent {
     pub async fn run(
         &self,
         instructions: String,
+        model: String,
         app_handle: AppHandle,
     ) -> Result<(), AgentError> {
-        println!("[agent] run() starting with: {}", instructions);
+        println!("[agent] run() starting with: {} (model: {})", instructions, model);
 
         let api_key = self.api_key.clone().ok_or(AgentError::NoApiKey)?;
         println!("[agent] API key present");
@@ -94,7 +95,7 @@ impl Agent {
 
         self.running.store(true, Ordering::SeqCst);
 
-        let client = AnthropicClient::new(api_key);
+        let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
 
         // emit started
@@ -192,12 +193,22 @@ impl Agent {
                                 None,
                             );
 
-                            // execute action
-                            let result = {
+                            // execute action on blocking thread (enigo requires main-thread-like context)
+                            let action_clone = action.clone();
+                            let screen_w = {
                                 let computer_guard = self.computer.lock().await;
                                 let computer = computer_guard.as_ref().unwrap();
-                                computer.perform_action(&action)
+                                computer.screen_width
                             };
+                            let screen_h = {
+                                let computer_guard = self.computer.lock().await;
+                                let computer = computer_guard.as_ref().unwrap();
+                                computer.screen_height
+                            };
+                            let result = tokio::task::spawn_blocking(move || {
+                                let computer = ComputerControl::with_dimensions(screen_w, screen_h);
+                                computer.perform_action(&action_clone)
+                            }).await.map_err(|e| AgentError::Computer(ComputerError::Input(e.to_string())))?;
 
                             match result {
                                 Ok(action_screenshot) => {
@@ -224,7 +235,7 @@ impl Agent {
                                         content: vec![ToolResultContent::Image {
                                             source: ImageSource {
                                                 source_type: "base64".to_string(),
-                                                media_type: "image/png".to_string(),
+                                                media_type: "image/jpeg".to_string(),
                                                 data: screenshot,
                                             },
                                         }],
