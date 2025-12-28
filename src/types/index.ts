@@ -1,5 +1,5 @@
 export interface AgentUpdate {
-  update_type: "started" | "thinking" | "action" | "screenshot" | "finished" | "error";
+  update_type: "started" | "thinking" | "action" | "screenshot" | "finished" | "error" | "bash_result";
   message: string;
   action?: ComputerAction;
   screenshot?: string;
@@ -19,7 +19,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  type?: "thinking" | "action" | "error" | "info";
+  type?: "thinking" | "action" | "error" | "info" | "bash_result";
   action?: ComputerAction;
   screenshot?: string;
   pending?: boolean;

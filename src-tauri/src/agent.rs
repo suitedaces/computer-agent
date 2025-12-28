@@ -1,4 +1,5 @@
 use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, ToolResultContent};
+use crate::bash::BashExecutor;
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +34,7 @@ pub struct Agent {
     api_key: Option<String>,
     running: Arc<AtomicBool>,
     computer: Mutex<Option<ComputerControl>>,
+    bash: Mutex<BashExecutor>,
 }
 
 impl Agent {
@@ -41,6 +43,7 @@ impl Agent {
             api_key: None,
             running,
             computer: Mutex::new(None),
+            bash: Mutex::new(BashExecutor::new()),
         }
     }
 
@@ -231,6 +234,52 @@ impl Agent {
                                         }],
                                     });
                                 }
+                            }
+                        }
+
+                        if name == "bash" {
+                            let command = input.get("command").and_then(|v| v.as_str());
+                            let restart = input.get("restart").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                            if restart {
+                                let mut bash = self.bash.lock().await;
+                                bash.restart();
+                                self.emit(&app_handle, "action", "Restarting bash session", Some(input.clone()), None);
+                                tool_results.push(ContentBlock::ToolResult {
+                                    tool_use_id: id.clone(),
+                                    content: vec![ToolResultContent::Text {
+                                        text: "Bash session restarted".to_string(),
+                                    }],
+                                });
+                            } else if let Some(cmd) = command {
+                                // emit action
+                                let preview = if cmd.len() > 50 {
+                                    format!("$ {}...", &cmd[..50])
+                                } else {
+                                    format!("$ {}", cmd)
+                                };
+                                self.emit(&app_handle, "action", &preview, Some(input.clone()), None);
+
+                                // execute
+                                let bash = self.bash.lock().await;
+                                let result = bash.execute(cmd);
+
+                                let output = match result {
+                                    Ok(out) => {
+                                        self.emit(&app_handle, "bash_result", &out.to_string(), None, None);
+                                        out.to_string()
+                                    }
+                                    Err(e) => {
+                                        let err_msg = format!("Error: {}", e);
+                                        self.emit(&app_handle, "bash_result", &err_msg, None, None);
+                                        err_msg
+                                    }
+                                };
+
+                                tool_results.push(ContentBlock::ToolResult {
+                                    tool_use_id: id.clone(),
+                                    content: vec![ToolResultContent::Text { text: output }],
+                                });
                             }
                         }
                     }

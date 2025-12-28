@@ -2,6 +2,7 @@
 
 mod agent;
 mod api;
+mod bash;
 mod computer;
 
 use agent::Agent;

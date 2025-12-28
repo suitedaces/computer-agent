@@ -10,12 +10,12 @@ import {
   Keyboard,
   Camera,
   ScrollText,
-  MessageSquare,
   AlertCircle,
   CheckCircle,
   Monitor,
   ChevronDown,
   ChevronUp,
+  Terminal,
 } from "lucide-react";
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
@@ -26,12 +26,16 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     switch (msg.type) {
       case "action":
         const action = msg.action?.action;
+        // bash command
+        if (msg.content.startsWith("$")) return <Terminal size={12} />;
         if (action?.includes("click") || action === "mouse_move")
           return <MousePointer2 size={12} />;
         if (action === "type") return <Keyboard size={12} />;
         if (action === "screenshot") return <Camera size={12} />;
         if (action === "scroll") return <ScrollText size={12} />;
         return <MousePointer2 size={12} />;
+      case "bash_result":
+        return <Terminal size={12} />;
       case "error":
         return <AlertCircle size={12} />;
       case "info":
@@ -48,6 +52,8 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     switch (msg.type) {
       case "error":
         return "bg-red-500/20 border-red-400/30 mr-8 px-3 py-2 rounded-2xl border backdrop-blur-sm";
+      case "bash_result":
+        return "bg-black/40 border-green-500/20 mr-8 px-3 py-2 rounded-lg border font-mono";
       default:
         return "mr-8";
     }
@@ -55,6 +61,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   const icon = getIcon();
   const isAction = msg.type === "action";
+  const isBashResult = msg.type === "bash_result";
   const showSweep = isAction && msg.pending;
 
   return (
@@ -65,12 +72,18 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     >
       <div className={`max-w-[85%] ${getBubbleStyle()}`}>
         <div className="flex items-start gap-2">
-          {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
-          <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
-            {showSweep && <span className="sweep-text">{msg.content}</span>}
-            {isAction && !showSweep && msg.content}
-            {!isAction && msg.content}
-          </p>
+          {icon && <span className={`mt-0.5 ${isBashResult ? "text-green-400/60" : "text-white/50"}`}>{icon}</span>}
+          {isBashResult ? (
+            <pre className="text-[11px] leading-relaxed break-words whitespace-pre-wrap text-green-300/80 overflow-x-auto max-h-[150px] overflow-y-auto">
+              {msg.content}
+            </pre>
+          ) : (
+            <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
+              {showSweep && <span className="sweep-text">{msg.content}</span>}
+              {isAction && !showSweep && msg.content}
+              {!isAction && msg.content}
+            </p>
+          )}
         </div>
       </div>
     </motion.div>

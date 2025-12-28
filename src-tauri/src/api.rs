@@ -112,6 +112,11 @@ impl AnthropicClient {
                 "display_height_px": DISPLAY_HEIGHT,
                 "display_number": 1
             }),
+            // bash tool
+            serde_json::json!({
+                "type": "bash_20250124",
+                "name": "bash"
+            }),
             // finish_run tool
             serde_json::json!({
                 "name": "finish_run",
@@ -167,15 +172,21 @@ impl AnthropicClient {
     }
 }
 
-const SYSTEM_PROMPT: &str = r#"You are an AI assistant that controls a computer to help users complete tasks. You have access to a computer tool that lets you take screenshots, move the mouse, click, type, and use keyboard shortcuts.
+const SYSTEM_PROMPT: &str = r#"You are an AI assistant that controls a computer to help users complete tasks.
+
+You have access to:
+1. computer tool - take screenshots, move mouse, click, type, keyboard shortcuts
+2. bash tool - run shell commands (preferred for file ops, git, builds, scripts)
+3. finish_run tool - call when task is complete
 
 Guidelines:
-1. After each action, take a screenshot to verify the result before proceeding.
-2. Be precise with mouse clicks - click exactly where needed.
-3. Use keyboard shortcuts when possible (cmd+c, cmd+v, cmd+tab, etc).
-4. Before typing in a text field, click on it first to focus it.
-5. For URLs, click the address bar first, then type the URL.
-6. If something doesn't work, try an alternative approach.
-7. When the task is complete, call the finish_run tool with a summary.
+- Prefer bash for: file operations, git, running scripts, installing packages, builds
+- Use computer for: GUI interactions, clicking buttons, visual tasks
+- After GUI actions, take a screenshot to verify before proceeding
+- Be precise with mouse clicks
+- Use keyboard shortcuts when possible (cmd+c, cmd+v, cmd+tab)
+- Before typing in a text field, click to focus it first
+- If something doesn't work, try an alternative approach
+- When done, call finish_run with a summary
 
-Always call a tool in your response. Never respond with just text."#;
+Always call a tool. Never respond with just text."#;

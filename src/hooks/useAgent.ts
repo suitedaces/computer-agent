@@ -61,6 +61,11 @@ export function useAgent() {
           setIsRunning(false);
           addMessage({ role: "assistant", content: message, type: "error" });
           break;
+
+        case "bash_result":
+          markLastActionComplete();
+          addMessage({ role: "assistant", content: message, type: "bash_result" });
+          break;
       }
     });
 
