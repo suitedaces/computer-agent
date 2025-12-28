@@ -12,7 +12,6 @@ import {
   Camera,
   ScrollText,
   AlertCircle,
-  CheckCircle,
   ChevronDown,
   ChevronUp,
   Monitor,
