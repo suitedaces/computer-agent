@@ -17,8 +17,6 @@ pub enum AgentError {
     Computer(#[from] ComputerError),
     #[error("MCP error: {0}")]
     Mcp(#[from] McpError),
-    #[error("Stopped by user")]
-    Stopped,
     #[error("No API key set")]
     NoApiKey,
 }
@@ -76,10 +74,6 @@ impl Agent {
 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
-    }
-
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
     }
 
     pub async fn run(
@@ -152,12 +146,13 @@ impl Agent {
             }],
         });
 
-        // agent loop
-        let max_iterations = 50;
+        // agent loop - limit iterations to prevent runaway tasks.
+        // 50 is enough for complex multi-step tasks while providing a safety bound
+        const MAX_ITERATIONS: usize = 50;
         let mut iteration = 0;
         println!("[agent] Starting agent loop");
 
-        while self.running.load(Ordering::SeqCst) && iteration < max_iterations {
+        while self.running.load(Ordering::SeqCst) && iteration < MAX_ITERATIONS {
             iteration += 1;
             println!("[agent] Iteration {}", iteration);
 
@@ -170,7 +165,7 @@ impl Agent {
             let stream_task = tokio::spawn(async move {
                 while let Some(event) = event_rx.recv().await {
                     match event {
-                        StreamEvent::ThinkingDelta { thinking, .. } => {
+                        StreamEvent::ThinkingDelta { thinking } => {
                             use tauri::Manager;
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
                                 let _ = window.emit("agent-stream", serde_json::json!({
@@ -179,7 +174,7 @@ impl Agent {
                                 }));
                             }
                         }
-                        StreamEvent::TextDelta { text, .. } => {
+                        StreamEvent::TextDelta { text } => {
                             use tauri::Manager;
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
                                 let _ = window.emit("agent-stream", serde_json::json!({
@@ -190,7 +185,7 @@ impl Agent {
                             // also emit globally for mini window
                             let _ = app_handle_clone.emit("agent:text_delta", serde_json::json!({ "delta": text }));
                         }
-                        StreamEvent::ToolUseStart { name, .. } => {
+                        StreamEvent::ToolUseStart { name } => {
                             use tauri::Manager;
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
                                 let _ = window.emit("agent-stream", serde_json::json!({
@@ -199,7 +194,7 @@ impl Agent {
                                 }));
                             }
                         }
-                        _ => {}
+                        StreamEvent::MessageStop => {}
                     }
                 }
             });
@@ -290,6 +285,9 @@ impl Agent {
                                 use tauri_nspanel::ManagerExt;
                                 app_handle.get_webview_panel("main").ok().map(|panel| {
                                     let ns_panel = panel.as_panel();
+                                    // SAFETY: NSPanel inherits from NSWindow, windowNumber is a valid
+                                    // selector that returns the window's unique identifier as NSInteger.
+                                    // The cast to u32 is safe because window numbers are non-negative.
                                     unsafe {
                                         let num: isize = objc2::msg_send![ns_panel, windowNumber];
                                         num as u32
@@ -399,17 +397,17 @@ impl Agent {
                                 let bash = self.bash.lock().await;
                                 let result = bash.execute(cmd);
 
-                                let (output, exit_code) = match result {
+                                let output = match result {
                                     Ok(out) => {
                                         let code = out.exit_code;
                                         let text = out.to_string();
                                         self.emit_with_exit_code(&app_handle, "bash_result", &text, None, None, Some(code));
-                                        (text, code)
+                                        text
                                     }
                                     Err(e) => {
                                         let err_msg = format!("Error: {}", e);
                                         self.emit_with_exit_code(&app_handle, "bash_result", &err_msg, None, None, Some(-1));
-                                        (err_msg, -1)
+                                        err_msg
                                     }
                                 };
 

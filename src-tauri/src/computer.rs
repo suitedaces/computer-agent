@@ -1,4 +1,4 @@
-use enigo::{Enigo, Key, Keyboard, Mouse, Settings, Coordinate, Button, Direction};
+use enigo::{Enigo, Mouse, Settings, Coordinate, Button, Direction};
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::DynamicImage;
@@ -313,45 +313,6 @@ impl ComputerControl {
         (scaled_x, scaled_y)
     }
 
-    fn press_key(&self, enigo: &mut Enigo, key_str: &str) -> Result<(), ComputerError> {
-        // handle key combinations like "cmd+c", "ctrl+shift+a"
-        let parts: Vec<&str> = key_str.split('+').collect();
-
-        let mut modifiers = Vec::new();
-        let mut main_key = None;
-
-        for part in parts {
-            let part_lower = part.to_lowercase();
-            match part_lower.as_str() {
-                "cmd" | "command" | "super" | "meta" => modifiers.push(Key::Meta),
-                "ctrl" | "control" => modifiers.push(Key::Control),
-                "alt" | "option" => modifiers.push(Key::Alt),
-                "shift" => modifiers.push(Key::Shift),
-                _ => main_key = Some(self.parse_key(part)?),
-            }
-        }
-
-        // press modifiers
-        for m in &modifiers {
-            enigo.key(*m, Direction::Press)
-                .map_err(|e| ComputerError::Input(e.to_string()))?;
-        }
-
-        // press main key
-        if let Some(key) = main_key {
-            enigo.key(key, Direction::Click)
-                .map_err(|e| ComputerError::Input(e.to_string()))?;
-        }
-
-        // release modifiers in reverse
-        for m in modifiers.iter().rev() {
-            enigo.key(*m, Direction::Release)
-                .map_err(|e| ComputerError::Input(e.to_string()))?;
-        }
-
-        Ok(())
-    }
-
     #[cfg(target_os = "macos")]
     fn type_text_applescript(&self, text: &str) -> Result<(), ComputerError> {
         use std::process::Command;
@@ -429,44 +390,5 @@ impl ComputerControl {
             .map_err(|e| ComputerError::Input(e.to_string()))?;
 
         Ok(())
-    }
-
-    fn parse_key(&self, key_str: &str) -> Result<Key, ComputerError> {
-        let key_lower = key_str.to_lowercase();
-        match key_lower.as_str() {
-            "return" | "enter" => Ok(Key::Return),
-            "tab" => Ok(Key::Tab),
-            "escape" | "esc" => Ok(Key::Escape),
-            "backspace" | "delete" => Ok(Key::Backspace),
-            "space" => Ok(Key::Space),
-            "up" | "uparrow" => Ok(Key::UpArrow),
-            "down" | "downarrow" => Ok(Key::DownArrow),
-            "left" | "leftarrow" => Ok(Key::LeftArrow),
-            "right" | "rightarrow" => Ok(Key::RightArrow),
-            "home" => Ok(Key::Home),
-            "end" => Ok(Key::End),
-            "pageup" => Ok(Key::PageUp),
-            "pagedown" => Ok(Key::PageDown),
-            "f1" => Ok(Key::F1),
-            "f2" => Ok(Key::F2),
-            "f3" => Ok(Key::F3),
-            "f4" => Ok(Key::F4),
-            "f5" => Ok(Key::F5),
-            "f6" => Ok(Key::F6),
-            "f7" => Ok(Key::F7),
-            "f8" => Ok(Key::F8),
-            "f9" => Ok(Key::F9),
-            "f10" => Ok(Key::F10),
-            "f11" => Ok(Key::F11),
-            "f12" => Ok(Key::F12),
-            _ => {
-                // single character
-                if let Some(c) = key_str.chars().next() {
-                    Ok(Key::Unicode(c))
-                } else {
-                    Err(ComputerError::UnknownAction(format!("Unknown key: {}", key_str)))
-                }
-            }
-        }
     }
 }
