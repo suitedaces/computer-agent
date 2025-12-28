@@ -183,7 +183,6 @@ impl Agent {
             });
 
             let mut tool_results: Vec<ContentBlock> = Vec::new();
-            let mut should_finish = false;
 
             for block in &response_content {
                 if !self.running.load(Ordering::SeqCst) {
@@ -208,16 +207,6 @@ impl Agent {
                     }
 
                     ContentBlock::ToolUse { id, name, input } => {
-                        if name == "finish_run" {
-                            let message = input
-                                .get("message")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Task completed");
-                            self.emit(&app_handle, "finished", message, None, None);
-                            should_finish = true;
-                            break;
-                        }
-
                         if name == "computer" {
                             // parse action
                             let action: ComputerAction = match serde_json::from_value(input.clone())
@@ -381,10 +370,6 @@ impl Agent {
 
                     _ => {}
                 }
-            }
-
-            if should_finish {
-                break;
             }
 
             // if no tools were used, the task is complete

@@ -149,24 +149,6 @@ impl AnthropicClient {
                 "type": "bash_20250124",
                 "name": "bash"
             }),
-            serde_json::json!({
-                "name": "finish_run",
-                "description": "Call this tool when you have completed the user's task. Provide a brief summary of what was accomplished.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "success": {
-                            "type": "boolean",
-                            "description": "Whether the task was completed successfully"
-                        },
-                        "message": {
-                            "type": "string",
-                            "description": "Brief summary of what was accomplished"
-                        }
-                    },
-                    "required": ["success", "message"]
-                }
-            }),
         ]
     }
 

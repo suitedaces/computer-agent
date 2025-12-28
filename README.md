@@ -22,10 +22,9 @@ https://github.com/user-attachments/assets/fa9b195e-fae6-4dbc-adb9-dc42519624b1
 4. Action is executed, new screenshot is taken
 5. Loop continues until task is complete
 
-The agent uses Claude's computer-use capability with three tools:
+The agent uses Claude's computer-use capability with two tools:
 - **computer** - mouse/keyboard control and screenshots
 - **bash** - terminal commands (with safety guards against destructive operations)
-- **finish_run** - signals task completion
 
 ## Setup
 
