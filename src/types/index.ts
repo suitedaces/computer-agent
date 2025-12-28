@@ -29,7 +29,7 @@ export interface ChatMessage {
   exitCode?: number;
 }
 
-export type ModelId = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5-20250514" | "claude-opus-4-5-20250514";
+export type ModelId = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5" | "claude-opus-4-5";
 
 export interface AgentState {
   isRunning: boolean;

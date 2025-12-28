@@ -29,7 +29,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   screenshot: null,
   apiKeySet: false,
   inputText: "",
-  selectedModel: "claude-sonnet-4-5-20250514" as ModelId,
+  selectedModel: "claude-sonnet-4-5" as ModelId,
 
   setIsRunning: (running) => set({ isRunning: running }),
 
