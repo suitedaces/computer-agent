@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Monitor,
   Brain,
+  Clock,
 } from "lucide-react";
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
@@ -93,14 +94,15 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     switch (msg.type) {
       case "action":
         const action = msg.action?.action;
-        if (action?.includes("click") || action === "mouse_move")
+        if (action?.includes("click") || action === "mouse_move" || action === "left_click_drag")
           return <MousePointer2 size={14} />;
-        if (action === "type") return <Keyboard size={14} />;
+        if (action === "type" || action === "key") return <Keyboard size={14} />;
         if (action === "screenshot") return <Camera size={14} />;
         if (action === "scroll") return <ScrollText size={14} />;
+        if (action === "wait") return <Clock size={14} />;
         return <MousePointer2 size={14} />;
       case "error":
-        return <AlertCircle size={14} />;
+        return <AlertCircle size={14} className="text-red-400" />;
       default:
         return null;
     }
@@ -110,16 +112,12 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     if (isUser) {
       return "bg-blue-500/30 border-blue-400/30 px-3 py-2 rounded-2xl border backdrop-blur-sm";
     }
-    switch (msg.type) {
-      case "error":
-        return "bg-red-500/20 border-red-400/30 px-3 py-2 rounded-2xl border backdrop-blur-sm";
-      default:
-        return "";
-    }
+    return "";
   };
 
   const icon = getIcon();
   const isAction = msg.type === "action";
+  const isError = msg.type === "error";
   const showSweep = isAction && msg.pending;
 
   return (
@@ -136,7 +134,11 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               <Streamdown isAnimating={false}>{msg.content}</Streamdown>
             </div>
           ) : (
-            <p className={`text-[13px] leading-relaxed break-words ${isAction ? (msg.pending ? "text-white/50 italic" : "text-white/50") : "text-white/90"}`}>
+            <p className={`text-[13px] leading-relaxed break-words ${
+              isError ? "text-red-400" :
+              isAction ? (msg.pending ? "text-white/50 italic" : "text-white/50") :
+              "text-white/90"
+            }`}>
               {showSweep && <span className="sweep-text">{msg.content}</span>}
               {isAction && !showSweep && msg.content}
               {!isAction && msg.content}
