@@ -11,6 +11,7 @@ export function useAgent() {
     setIsRunning,
     addMessage,
     markLastActionComplete,
+    updateLastBashWithResult,
     setScreenshot,
     setApiKeySet,
     setInputText,
@@ -26,7 +27,7 @@ export function useAgent() {
 
     const unlistenPromise = listen<AgentUpdate>("agent-update", (event) => {
       invoke("debug_log", { message: `Event received: ${event.payload.update_type}` });
-      const { update_type, message, action, screenshot } = event.payload;
+      const { update_type, message, action, screenshot, exit_code } = event.payload;
 
       switch (update_type) {
         case "started":
@@ -38,12 +39,21 @@ export function useAgent() {
           break;
 
         case "action":
-          addMessage({
-            role: "assistant",
-            content: message,
-            type: "action",
-            action: action,
-          });
+          // bash commands get their own type
+          if (message.startsWith("$ ")) {
+            addMessage({
+              role: "assistant",
+              content: message.slice(2), // remove "$ " prefix, store just the command
+              type: "bash",
+            });
+          } else {
+            addMessage({
+              role: "assistant",
+              content: message,
+              type: "action",
+              action: action,
+            });
+          }
           break;
 
         case "screenshot":
@@ -63,8 +73,7 @@ export function useAgent() {
           break;
 
         case "bash_result":
-          markLastActionComplete();
-          addMessage({ role: "assistant", content: message, type: "bash_result" });
+          updateLastBashWithResult(message, exit_code);
           break;
       }
     });
@@ -78,7 +87,7 @@ export function useAgent() {
     return () => {
       unlistenPromise.then((fn) => fn());
     };
-  }, [setIsRunning, addMessage, markLastActionComplete, setScreenshot, setApiKeySet]);
+  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setScreenshot, setApiKeySet]);
 
   const submit = useCallback(async () => {
     const text = inputText.trim();

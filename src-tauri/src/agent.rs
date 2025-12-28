@@ -28,6 +28,10 @@ pub struct AgentUpdate {
     pub action: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bash_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
 }
 
 pub struct Agent {
@@ -264,15 +268,17 @@ impl Agent {
                                 let bash = self.bash.lock().await;
                                 let result = bash.execute(cmd);
 
-                                let output = match result {
+                                let (output, exit_code) = match result {
                                     Ok(out) => {
-                                        self.emit(&app_handle, "bash_result", &out.to_string(), None, None);
-                                        out.to_string()
+                                        let code = out.exit_code;
+                                        let text = out.to_string();
+                                        self.emit_with_exit_code(&app_handle, "bash_result", &text, None, None, Some(code));
+                                        (text, code)
                                     }
                                     Err(e) => {
                                         let err_msg = format!("Error: {}", e);
-                                        self.emit(&app_handle, "bash_result", &err_msg, None, None);
-                                        err_msg
+                                        self.emit_with_exit_code(&app_handle, "bash_result", &err_msg, None, None, Some(-1));
+                                        (err_msg, -1)
                                     }
                                 };
 
@@ -317,14 +323,27 @@ impl Agent {
         action: Option<serde_json::Value>,
         screenshot: Option<String>,
     ) {
+        self.emit_with_exit_code(app_handle, update_type, message, action, screenshot, None);
+    }
+
+    fn emit_with_exit_code(
+        &self,
+        app_handle: &AppHandle,
+        update_type: &str,
+        message: &str,
+        action: Option<serde_json::Value>,
+        screenshot: Option<String>,
+        exit_code: Option<i32>,
+    ) {
         use tauri::Manager;
         let payload = AgentUpdate {
             update_type: update_type.to_string(),
             message: message.to_string(),
             action,
             screenshot,
+            bash_command: None,
+            exit_code,
         };
-        // try emitting to specific window
         if let Some(window) = app_handle.get_webview_window("main") {
             match window.emit("agent-update", payload) {
                 Ok(_) => println!("[agent] Emit success: {}", update_type),

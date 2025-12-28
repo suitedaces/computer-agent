@@ -18,28 +18,91 @@ import {
   Terminal,
 } from "lucide-react";
 
+function BashBlock({ msg }: { msg: ChatMessage }) {
+  const [expanded, setExpanded] = useState(true);
+  const hasOutput = msg.bashOutput !== undefined;
+  const isSuccess = msg.exitCode === 0;
+  const isError = msg.exitCode !== undefined && msg.exitCode !== 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mr-4"
+    >
+      <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#30363d]">
+        {/* command with inline status */}
+        <div className="px-2 py-1.5 font-mono flex items-center gap-2">
+          <span className="text-[#3fb950] text-[11px] select-none">$</span>
+          <span className={`text-[11px] text-[#e6edf3] break-all flex-1 ${msg.pending ? "sweep-text" : ""}`}>
+            {msg.content}
+          </span>
+          {msg.pending && <span className="text-[8px] text-[#8b949e] animate-pulse shrink-0">...</span>}
+          {hasOutput && msg.exitCode !== undefined && (
+            <span className={`text-[8px] font-mono shrink-0 ${isSuccess ? "text-[#3fb950]" : "text-[#f85149]"}`}>
+              {msg.exitCode}
+            </span>
+          )}
+        </div>
+
+        {/* output */}
+        {hasOutput && (
+          <>
+            <div className="border-t border-[#30363d]">
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="w-full px-2 py-0.5 flex items-center gap-1 text-[8px] text-[#8b949e] hover:text-[#c9d1d9] transition-colors"
+              >
+                {expanded ? <ChevronUp size={8} /> : <ChevronDown size={8} />}
+                output
+              </button>
+            </div>
+            <AnimatePresence>
+              {expanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <pre className={`px-2 py-1.5 text-[10px] leading-relaxed break-words whitespace-pre-wrap max-h-[120px] overflow-y-auto ${
+                    isError ? "text-[#f85149]" : "text-[#8b949e]"
+                  }`}>
+                    {msg.bashOutput}
+                  </pre>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === "user";
+
+  // bash commands get their own block
+  if (msg.type === "bash") {
+    return <BashBlock msg={msg} />;
+  }
 
   const getIcon = () => {
     if (isUser) return null;
     switch (msg.type) {
       case "action":
         const action = msg.action?.action;
-        // bash command
-        if (msg.content.startsWith("$")) return <Terminal size={12} />;
         if (action?.includes("click") || action === "mouse_move")
-          return <MousePointer2 size={12} />;
-        if (action === "type") return <Keyboard size={12} />;
-        if (action === "screenshot") return <Camera size={12} />;
-        if (action === "scroll") return <ScrollText size={12} />;
-        return <MousePointer2 size={12} />;
-      case "bash_result":
-        return <Terminal size={12} />;
+          return <MousePointer2 size={14} />;
+        if (action === "type") return <Keyboard size={14} />;
+        if (action === "screenshot") return <Camera size={14} />;
+        if (action === "scroll") return <ScrollText size={14} />;
+        return <MousePointer2 size={14} />;
       case "error":
-        return <AlertCircle size={12} />;
+        return <AlertCircle size={14} />;
       case "info":
-        return <CheckCircle size={12} />;
+        return <CheckCircle size={14} />;
       default:
         return null;
     }
@@ -52,8 +115,6 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     switch (msg.type) {
       case "error":
         return "bg-red-500/20 border-red-400/30 mr-8 px-3 py-2 rounded-2xl border backdrop-blur-sm";
-      case "bash_result":
-        return "bg-black/40 border-green-500/20 mr-8 px-3 py-2 rounded-lg border font-mono";
       default:
         return "mr-8";
     }
@@ -61,7 +122,6 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   const icon = getIcon();
   const isAction = msg.type === "action";
-  const isBashResult = msg.type === "bash_result";
   const showSweep = isAction && msg.pending;
 
   return (
@@ -72,27 +132,37 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     >
       <div className={`max-w-[85%] ${getBubbleStyle()}`}>
         <div className="flex items-start gap-2">
-          {icon && <span className={`mt-0.5 ${isBashResult ? "text-green-400/60" : "text-white/50"}`}>{icon}</span>}
-          {isBashResult ? (
-            <pre className="text-[11px] leading-relaxed break-words whitespace-pre-wrap text-green-300/80 overflow-x-auto max-h-[150px] overflow-y-auto">
-              {msg.content}
-            </pre>
-          ) : (
-            <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
-              {showSweep && <span className="sweep-text">{msg.content}</span>}
-              {isAction && !showSweep && msg.content}
-              {!isAction && msg.content}
-            </p>
-          )}
+          {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
+          <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
+            {showSweep && <span className="sweep-text">{msg.content}</span>}
+            {isAction && !showSweep && msg.content}
+            {!isAction && msg.content}
+          </p>
         </div>
       </div>
     </motion.div>
   );
 }
 
-function ScreenPreview() {
+function ScreenPreview({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement> }) {
   const { screenshot, isRunning } = useAgentStore();
   const [collapsed, setCollapsed] = useState(false);
+
+  // auto-collapse after 2 seconds when expanded, then scroll to bottom
+  useEffect(() => {
+    if (!collapsed && screenshot) {
+      const timer = setTimeout(() => {
+        setCollapsed(true);
+        // scroll to bottom after collapse
+        setTimeout(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }
+        }, 100);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [collapsed, screenshot, scrollRef]);
 
   if (!screenshot) return null;
 
@@ -200,7 +270,7 @@ export default function App() {
 
       {/* screen preview */}
       <AnimatePresence>
-        <ScreenPreview />
+        <ScreenPreview scrollRef={scrollRef} />
       </AnimatePresence>
 
       {/* input */}

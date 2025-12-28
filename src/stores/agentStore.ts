@@ -40,7 +40,7 @@ export const useAgentStore = create<AgentState>((set) => ({
           ...msg,
           id: crypto.randomUUID(),
           timestamp: new Date(),
-          pending: msg.type === "action" ? true : undefined,
+          pending: (msg.type === "action" || msg.type === "bash") ? true : undefined,
         },
       ],
     })),
@@ -52,6 +52,18 @@ export const useAgentStore = create<AgentState>((set) => ({
         if (messages[i].type === "action" && messages[i].pending) {
           const content = toPastTense(messages[i].content);
           messages[i] = { ...messages[i], pending: false, content };
+          break;
+        }
+      }
+      return { messages };
+    }),
+
+  updateLastBashWithResult: (output, exitCode) =>
+    set((state) => {
+      const messages = [...state.messages];
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].type === "bash" && messages[i].pending) {
+          messages[i] = { ...messages[i], pending: false, bashOutput: output, exitCode };
           break;
         }
       }
