@@ -12,9 +12,9 @@ import {
   ScrollText,
   AlertCircle,
   CheckCircle,
-  Monitor,
   ChevronDown,
   ChevronUp,
+  Monitor,
 } from "lucide-react";
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
@@ -143,7 +143,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   );
 }
 
-function ScreenPreview({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement> }) {
+function ScreenPreview({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const { screenshot, isRunning } = useAgentStore();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -273,10 +273,10 @@ export default function App() {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="text-center py-16 text-white/25"
+                className="flex flex-col items-center justify-center h-full pt-24 text-white/25"
               >
-                <Monitor size={28} className="mx-auto mb-3 opacity-40" />
-                <p className="text-sm">what should I do?</p>
+                <img src="/vaporlofi.gif" alt="" className="w-[28rem] h-auto opacity-60" />
+                <p className="text-sm mt-4">what should I do?</p>
               </motion.div>
             ) : (
               messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)

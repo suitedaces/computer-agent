@@ -14,14 +14,14 @@
     "@tauri-apps/plugin-shell": "^2",
     "framer-motion": "^11",
     "lucide-react": "^0.468",
-    "react": "^18",
-    "react-dom": "^18",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "zustand": "^5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4",
     "autoprefixer": "^10",
     "postcss": "^8",
