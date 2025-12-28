@@ -21,6 +21,19 @@ pub enum AgentError {
     NoApiKey,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentMode {
+    Computer,
+    Browser,
+}
+
+impl Default for AgentMode {
+    fn default() -> Self {
+        Self::Computer
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentUpdate {
     pub update_type: String,
@@ -80,10 +93,11 @@ impl Agent {
         &self,
         instructions: String,
         model: String,
+        mode: AgentMode,
         history: Vec<HistoryMessage>,
         app_handle: AppHandle,
     ) -> Result<(), AgentError> {
-        println!("[agent] run() starting with: {} (model: {}, history: {} msgs)", instructions, model, history.len());
+        println!("[agent] run() starting with: {} (model: {}, mode: {:?}, history: {} msgs)", instructions, model, mode, history.len());
 
         let api_key = self.api_key.clone().ok_or(AgentError::NoApiKey)?;
         println!("[agent] API key present");
@@ -105,17 +119,23 @@ impl Agent {
 
         self.running.store(true, Ordering::SeqCst);
 
-        // get mcp tools if client is connected
-        let mcp_tools = if let Some(ref mcp_client) = self.mcp_client {
-            let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
-            if client.is_connected() {
-                let tools = client.get_tools_for_claude();
-                println!("[agent] MCP tools available: {}", tools.len());
-                tools
+        // get mcp tools only in browser mode
+        let mcp_tools = if mode == AgentMode::Browser {
+            if let Some(ref mcp_client) = self.mcp_client {
+                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
+                if client.is_connected() {
+                    let tools = client.get_tools_for_claude();
+                    println!("[agent] MCP tools available: {}", tools.len());
+                    tools
+                } else {
+                    println!("[agent] MCP client not connected");
+                    Vec::new()
+                }
             } else {
                 Vec::new()
             }
         } else {
+            println!("[agent] Computer mode - skipping MCP tools");
             Vec::new()
         };
 
@@ -199,7 +219,7 @@ impl Agent {
                 }
             });
 
-            let response_content = match client.send_message_streaming(messages.clone(), event_tx, &mcp_tools).await {
+            let response_content = match client.send_message_streaming(messages.clone(), event_tx, &mcp_tools, mode).await {
                 Ok(content) => {
                     println!("[agent] API streaming response complete, {} blocks", content.len());
                     content

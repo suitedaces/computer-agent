@@ -31,12 +31,15 @@ export interface ChatMessage {
 
 export type ModelId = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5" | "claude-opus-4-5";
 
+export type AgentMode = "computer" | "browser";
+
 export interface AgentState {
   isRunning: boolean;
   messages: ChatMessage[];
   apiKeySet: boolean;
   inputText: string;
   selectedModel: ModelId;
+  selectedMode: AgentMode;
   streamingText: string;
   streamingThinking: string;
 
@@ -47,6 +50,7 @@ export interface AgentState {
   setApiKeySet: (set: boolean) => void;
   setInputText: (text: string) => void;
   setSelectedModel: (model: ModelId) => void;
+  setSelectedMode: (mode: AgentMode) => void;
   clearMessages: () => void;
   appendStreamingText: (text: string) => void;
   clearStreamingText: () => void;

@@ -1,3 +1,4 @@
+use crate::agent::AgentMode;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -133,20 +134,27 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self, mcp_tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
-        let mut tools = vec![
-            serde_json::json!({
+    fn build_tools(&self, mcp_tools: &[serde_json::Value], mode: AgentMode) -> Vec<serde_json::Value> {
+        let mut tools = Vec::new();
+
+        // computer tool only in computer mode
+        if mode == AgentMode::Computer {
+            tools.push(serde_json::json!({
                 "type": "computer_20250124",
                 "name": "computer",
                 "display_width_px": DISPLAY_WIDTH,
                 "display_height_px": DISPLAY_HEIGHT,
                 "display_number": 1
-            }),
-            serde_json::json!({
-                "type": "bash_20250124",
-                "name": "bash"
-            }),
-        ];
+            }));
+        }
+
+        // bash available in both modes
+        tools.push(serde_json::json!({
+            "type": "bash_20250124",
+            "name": "bash"
+        }));
+
+        // mcp tools only in browser mode (passed in already filtered)
         tools.extend(mcp_tools.iter().cloned());
         tools
     }
@@ -156,12 +164,13 @@ impl AnthropicClient {
         messages: Vec<Message>,
         event_tx: mpsc::UnboundedSender<StreamEvent>,
         mcp_tools: &[serde_json::Value],
+        mode: AgentMode,
     ) -> Result<Vec<ContentBlock>, ApiError> {
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: MAX_TOKENS,
             system: SYSTEM_PROMPT.to_string(),
-            tools: self.build_tools(mcp_tools),
+            tools: self.build_tools(mcp_tools, mode),
             messages,
             stream: true,
             thinking: ThinkingConfig {

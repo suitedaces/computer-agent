@@ -9,6 +9,7 @@ export function useAgent() {
     isRunning,
     inputText,
     selectedModel,
+    selectedMode,
     messages,
     setIsRunning,
     addMessage,
@@ -122,12 +123,12 @@ export function useAgent() {
     setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, history });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history });
     } catch (error) {
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, selectedModel, messages, addMessage, setInputText, setIsRunning]);
+  }, [inputText, isRunning, selectedModel, selectedMode, messages, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {
