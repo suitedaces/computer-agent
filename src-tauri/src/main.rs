@@ -21,7 +21,7 @@ use tauri_nspanel::{
 
 #[cfg(target_os = "macos")]
 tauri_panel! {
-    panel!(GruntyPanel {
+    panel!(TaskhomiePanel {
         config: {
             can_become_key_window: true,
             is_floating_panel: true
@@ -53,7 +53,7 @@ async fn run_agent(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[grunty] run_agent called with: {}", instructions);
+    println!("[taskhomie] run_agent called with: {}", instructions);
 
     let agent = state.agent.clone();
 
@@ -70,8 +70,8 @@ async fn run_agent(
     tokio::spawn(async move {
         let agent_guard = agent.lock().await;
         match agent_guard.run(instructions, app_handle).await {
-            Ok(_) => println!("[grunty] Agent finished"),
-            Err(e) => println!("[grunty] Agent error: {:?}", e),
+            Ok(_) => println!("[taskhomie] Agent finished"),
+            Err(e) => println!("[taskhomie] Agent error: {:?}", e),
         }
     });
 
@@ -81,7 +81,7 @@ async fn run_agent(
 #[tauri::command]
 fn stop_agent(state: State<'_, AppState>) -> Result<(), String> {
     state.running.store(false, std::sync::atomic::Ordering::SeqCst);
-    println!("[grunty] Stop requested");
+    println!("[taskhomie] Stop requested");
     Ok(())
 }
 
@@ -105,7 +105,7 @@ fn main() {
     let mut agent = Agent::new(running.clone());
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-        println!("[grunty] API key loaded");
+        println!("[taskhomie] API key loaded");
         agent.set_api_key(key);
     }
 
@@ -130,7 +130,7 @@ fn main() {
             // convert window to panel for fullscreen support
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
-                if let Ok(panel) = window.to_panel::<GruntyPanel>() {
+                if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
                     panel.set_level(PanelLevel::Floating.value());
                     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
                     panel.set_collection_behavior(

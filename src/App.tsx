@@ -244,7 +244,7 @@ export default function App() {
       {/* titlebar */}
       <div className="titlebar h-11 flex items-center justify-center border-b border-white/5 shrink-0">
         <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">
-          Grunty
+          taskhomie
         </span>
       </div>
 

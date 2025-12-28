@@ -1,66 +1,79 @@
-# 👨🏽‍💻 Grunty
+# taskhomie
 
-Self-hosted desktop app to have AI control your computer, powered by the new Claude [computer use](https://www.anthropic.com/news/3-5-models-and-computer-use) capability. Allow Claude to take over your laptop and do your tasks for you (or at least attempt to, lol). Written in Python, using PyQt.
+Local AI agent that controls your computer. Give it natural language instructions and watch Claude take screenshots, move your mouse, click, type, and run terminal commands.
+
+Built with Tauri, React, and Rust.
 
 ## Demo
-Here, I asked it to use [vim](https://vim.rtorr.com/) to create a game in Python, run it, and play it.
 
 https://github.com/user-attachments/assets/fa9b195e-fae6-4dbc-adb9-dc42519624b1
 
-Video was sped up 8x btw. [Computer use](https://www.anthropic.com/news/3-5-models-and-computer-use) is pretty slow as of today.
+## Disclaimers
 
-## ⚠️ Important Disclaimers
+1. **Experimental software** - An AI controls your mouse and keyboard. Things can go wrong.
+2. **You're responsible** - If it wipes your computer, sends emails, or orders 100 pizzas... that's on you.
+3. **Anthropic sees your screen** - Screenshots are sent to the API during actions. Hide sensitive info.
 
-1. **This is experimental software** - It gives an AI control of your mouse and keyboard. Things can and will go wrong.
+## How It Works
 
-2. **Tread Lightly** - If it wipes your computer, sends weird emails, or orders 100 pizzas... that's on you. 
+1. You type an instruction ("open firefox and search for cats")
+2. Claude takes a screenshot of your screen
+3. Claude decides what to do: move mouse, click, type, run bash commands
+4. Action is executed, new screenshot is taken
+5. Loop continues until task is complete
 
-Anthropic can see your screen through screenshots during actions. Hide sensitive information or private stuff.
+The agent uses Claude's computer-use capability with three tools:
+- **computer** - mouse/keyboard control and screenshots
+- **bash** - terminal commands (with safety guards against destructive operations)
+- **finish_run** - signals task completion
 
-## 🎯 Features
-- Literally ask AI to do ANYTHING on your computer that you do with a mouse and keyboard. Browse the web, write code, blah blah.
+## Setup
 
-# 💻 Platforms
-- Anything you can run Python on: MacOS, Windows, Linux, etc.
-
-## 🛠️ Setup
-
-Get an Anthropic API key [here]([https://console.anthropic.com/keys](https://console.anthropic.com/dashboard)).
+**Requirements:**
+- Node.js & npm
+- Rust & Cargo
+- Anthropic API key
 
 ```bash
-# Python 3.10+ recommended
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-pip install -r requirements.txt
+# install deps
+npm install
 
-# Add API key to .env
+# add your api key
 echo "ANTHROPIC_API_KEY=your-key-here" > .env
 
-# Run
-python run.py
+# run dev
+npm run tauri dev
+
+# or build for production
+npm run tauri build
 ```
 
-## 🔑 Productivity Keybindings
-- `Ctrl + Enter`: Execute the current instruction
-- `Ctrl + C`: Stop the current agent action
-- `Ctrl + W`: Minimize to system tray
-- `Ctrl + Q`: Quit application
+On macOS, you'll need to grant accessibility permissions when prompted (System Settings → Privacy & Security → Accessibility).
 
-## 💡 Tips
-- Claude really loves Firefox. You might want to install it for better UI detection and accurate mouse clicks.
-- Be specific and explicit, help it out a bit
-- Always monitor the agent's actions
+## Tips
 
-## 🐛 Known Issues
+- Claude works best with Firefox for UI detection
+- Be specific with your instructions
+- Always monitor what it's doing
+- Start with simple tasks to get a feel for it
 
-- Sometimes, it doesn't take a screenshot to validate that the input is selected, and types stuff in the wrong place.. Press CMD+C to end the action when this happens, and quit and restart the agent. I'm working on a fix.
+## Known Limitations
 
-## 🤝 Contributing
+- AI sees screen at 1280x800 resolution (resized from actual)
+- Sometimes types in wrong place if it skips screenshot validation
+- Computer use is still slow - be patient
 
-Issues and PRs are most welcome! Made this is in a day so don't really have a roadmap in mind. Hmu on Twitter @ishanxnagpal if you're got interesting ideas you wanna share. 
+## Stack
 
-## 📄 License
+- **Frontend**: React, TypeScript, Tailwind, Zustand, Framer Motion
+- **Backend**: Rust, Tauri 2, Tokio
+- **Computer control**: enigo (mouse/keyboard), xcap (screenshots)
+- **API**: Claude claude-sonnet-4-5 with computer-use-2025-01-24 beta
+
+## Contributing
+
+PRs welcome. Hit me up on Twitter @ishanxnagpal.
+
+## License
 
 [Apache License 2.0](LICENSE)
-
----

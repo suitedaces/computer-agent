@@ -1,12 +1,12 @@
 [package]
-name = "grunty"
+name = "taskhomie"
 version = "0.1.0"
 description = "AI-powered computer control"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "grunty_lib"
+name = "taskhomie_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
