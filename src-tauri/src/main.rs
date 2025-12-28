@@ -153,7 +153,7 @@ fn main() {
             // create tray icon
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .icon_as_template(true)
+                .icon_as_template(false)
                 .on_tray_icon_event(|tray, event| {
                     // update tray position for positioner plugin
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
