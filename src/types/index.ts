@@ -34,7 +34,6 @@ export type ModelId = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5" | "claud
 export interface AgentState {
   isRunning: boolean;
   messages: ChatMessage[];
-  screenshot: string | null;
   apiKeySet: boolean;
   inputText: string;
   selectedModel: ModelId;
@@ -43,9 +42,8 @@ export interface AgentState {
 
   setIsRunning: (running: boolean) => void;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
-  markLastActionComplete: () => void;
+  markLastActionComplete: (screenshot?: string) => void;
   updateLastBashWithResult: (output: string, exitCode?: number) => void;
-  setScreenshot: (screenshot: string | null) => void;
   setApiKeySet: (set: boolean) => void;
   setInputText: (text: string) => void;
   setSelectedModel: (model: ModelId) => void;

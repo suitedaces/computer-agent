@@ -27,7 +27,6 @@ function toPastTense(text: string): string {
 export const useAgentStore = create<AgentState>((set) => ({
   isRunning: false,
   messages: [],
-  screenshot: null,
   apiKeySet: false,
   inputText: "",
   selectedModel: "claude-haiku-4-5-20251001" as ModelId,
@@ -49,13 +48,13 @@ export const useAgentStore = create<AgentState>((set) => ({
       ],
     })),
 
-  markLastActionComplete: () =>
+  markLastActionComplete: (screenshot?: string) =>
     set((state) => {
       const messages = [...state.messages];
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].type === "action" && messages[i].pending) {
           const content = toPastTense(messages[i].content);
-          messages[i] = { ...messages[i], pending: false, content };
+          messages[i] = { ...messages[i], pending: false, content, screenshot };
           break;
         }
       }
@@ -73,8 +72,6 @@ export const useAgentStore = create<AgentState>((set) => ({
       }
       return { messages };
     }),
-
-  setScreenshot: (screenshot) => set({ screenshot }),
 
   setApiKeySet: (apiKeySet) => set({ apiKeySet }),
 

@@ -14,7 +14,6 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
-  Monitor,
   Brain,
   Clock,
 } from "lucide-react";
@@ -29,7 +28,6 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className=""
     >
       <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#30363d]">
         {/* command with inline status */}
@@ -81,6 +79,64 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
   );
 }
 
+function ScreenshotBlock({ msg }: { msg: ChatMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const prevScreenshot = useRef(msg.screenshot);
+
+  // auto-expand when screenshot arrives, then collapse after 2 seconds
+  useEffect(() => {
+    if (msg.screenshot && !prevScreenshot.current) {
+      setExpanded(true);
+      const timer = setTimeout(() => setExpanded(false), 2000);
+      return () => clearTimeout(timer);
+    }
+    prevScreenshot.current = msg.screenshot;
+  }, [msg.screenshot]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex justify-start"
+    >
+      <div>
+        <button
+          onClick={() => msg.screenshot && setExpanded(!expanded)}
+          className="flex items-center gap-2 text-white/50 hover:text-white/70 transition-colors"
+        >
+          <Camera size={14} />
+          <span className={`text-[13px] ${msg.pending ? "sweep-text italic" : ""}`}>
+            {msg.pending ? "Taking screenshot" : "Took screenshot"}
+          </span>
+          {msg.screenshot && (
+            <span className="text-white/30">
+              {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+            </span>
+          )}
+        </button>
+        <AnimatePresence>
+          {expanded && msg.screenshot && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden mt-1.5"
+            >
+              <div className="rounded-lg overflow-hidden bg-black/40">
+                <img
+                  src={`data:image/jpeg;base64,${msg.screenshot}`}
+                  alt="Screenshot"
+                  className="w-full h-auto"
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+}
+
 function formatActionContent(msg: ChatMessage): React.ReactNode {
   const action = msg.action;
   if (!action) return msg.content;
@@ -112,6 +168,11 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     return <BashBlock msg={msg} />;
   }
 
+  // screenshot actions get their own block
+  if (msg.type === "action" && msg.action?.action === "screenshot") {
+    return <ScreenshotBlock msg={msg} />;
+  }
+
   const getIcon = () => {
     if (isUser) return null;
     switch (msg.type) {
@@ -120,7 +181,6 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
         if (action?.includes("click") || action === "mouse_move" || action === "left_click_drag")
           return <MousePointer2 size={14} />;
         if (action === "type" || action === "key") return <Keyboard size={14} />;
-        if (action === "screenshot") return <Camera size={14} />;
         if (action === "scroll") return <ScrollText size={14} />;
         if (action === "wait") return <Clock size={14} />;
         return <MousePointer2 size={14} />;
@@ -153,7 +213,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
         <div className="flex items-start gap-2">
           {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
           {msg.type === "thinking" || msg.type === "info" ? (
-            <div className={`text-[13px] leading-relaxed prose prose-invert prose-sm max-w-none ${msg.type === "thinking" ? "text-white/90" : "text-white/90"}`}>
+            <div className="text-[13px] leading-relaxed prose prose-invert prose-sm max-w-none text-white/90">
               <Streamdown isAnimating={false}>{msg.content}</Streamdown>
             </div>
           ) : (
@@ -168,70 +228,6 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             </p>
           )}
         </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function ScreenPreview({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
-  const { screenshot, isRunning } = useAgentStore();
-  const [collapsed, setCollapsed] = useState(false);
-
-  // auto-collapse after 2 seconds when expanded, then scroll to bottom
-  useEffect(() => {
-    if (!collapsed && screenshot) {
-      const timer = setTimeout(() => {
-        setCollapsed(true);
-        // scroll to bottom after collapse
-        setTimeout(() => {
-          if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-          }
-        }, 100);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [collapsed, screenshot, scrollRef]);
-
-  if (!screenshot) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-      exit={{ opacity: 0, height: 0 }}
-      className="mx-3 mb-2"
-    >
-      <div className="glass-card p-2 relative">
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center gap-1.5 w-full text-[10px] text-white/40 hover:text-white/60 transition-colors"
-        >
-          <Monitor size={10} />
-          <span>live</span>
-          {isRunning && <span className="status-dot running" />}
-          <span className="ml-auto">
-            {collapsed ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
-          </span>
-        </button>
-        <AnimatePresence>
-          {!collapsed && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-1.5"
-            >
-              <div className="rounded-lg overflow-hidden bg-black/40">
-                <img
-                  src={`data:image/jpeg;base64,${screenshot}`}
-                  alt="Screen"
-                  className="w-full h-auto"
-                />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </motion.div>
   );
@@ -313,7 +309,6 @@ export default function App() {
     inputRef.current?.focus();
   }, []);
 
-
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -338,10 +333,10 @@ export default function App() {
           value={selectedModel}
           onChange={(e) => setSelectedModel(e.target.value as ModelId)}
           disabled={isRunning}
-          className="bg-white/5 border border-white/10 rounded-md px-2 py-1 text-[10px] text-white/60 focus:outline-none focus:border-white/20 disabled:opacity-50"
+          className="glass-select"
         >
           {MODELS.map((m) => (
-            <option key={m.id} value={m.id} className="bg-black text-white">
+            <option key={m.id} value={m.id}>
               {m.label}
             </option>
           ))}
@@ -371,11 +366,6 @@ export default function App() {
           </AnimatePresence>
         </div>
       </div>
-
-      {/* screen preview */}
-      <AnimatePresence>
-        <ScreenPreview scrollRef={scrollRef} />
-      </AnimatePresence>
 
       {/* input */}
       <div className="p-3 pt-0 shrink-0">

@@ -14,7 +14,6 @@ export function useAgent() {
     addMessage,
     markLastActionComplete,
     updateLastBashWithResult,
-    setScreenshot,
     setApiKeySet,
     setInputText,
     appendStreamingText,
@@ -69,10 +68,7 @@ export function useAgent() {
           break;
 
         case "screenshot":
-          markLastActionComplete();
-          if (screenshot) {
-            setScreenshot(screenshot);
-          }
+          markLastActionComplete(screenshot);
           break;
 
         case "finished":
@@ -110,7 +106,7 @@ export function useAgent() {
       unlistenPromise.then((fn) => fn());
       unlistenStreamPromise.then((fn) => fn());
     };
-  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setScreenshot, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking]);
+  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking]);
 
   const submit = useCallback(async () => {
     const text = inputText.trim();
