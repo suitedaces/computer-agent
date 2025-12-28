@@ -9,6 +9,14 @@ use thiserror::Error;
 use xcap::Monitor;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
+#[cfg(target_os = "macos")]
+use core_graphics::geometry::{CGRect, CGPoint, CGSize};
+#[cfg(target_os = "macos")]
+use core_graphics::window::{
+    create_image, kCGWindowListOptionOnScreenBelowWindow,
+    kCGWindowImageDefault, CGWindowID,
+};
+
 const AI_WIDTH: u32 = 1280;
 const AI_HEIGHT: u32 = 800;
 
@@ -76,6 +84,61 @@ impl ComputerControl {
             .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Triangle);
 
         // encode as JPEG (much faster than PNG, still good quality)
+        let mut buffer = Vec::new();
+        resized
+            .write_to(&mut Cursor::new(&mut buffer), image::ImageFormat::Jpeg)
+            .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
+
+        Ok(BASE64.encode(&buffer))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn take_screenshot_excluding(&self, window_id: u32) -> Result<String, ComputerError> {
+        // capture full screen but exclude windows at and above window_id
+        let bounds = CGRect::new(
+            &CGPoint::new(0.0, 0.0),
+            &CGSize::new(self.screen_width as f64, self.screen_height as f64),
+        );
+
+        let cg_image = create_image(
+            bounds,
+            kCGWindowListOptionOnScreenBelowWindow,
+            window_id as CGWindowID,
+            kCGWindowImageDefault,
+        ).ok_or_else(|| ComputerError::Screenshot("Failed to create CGImage".to_string()))?;
+
+        // convert CGImage to our format
+        let width = cg_image.width();
+        let height = cg_image.height();
+        let bytes_per_row = cg_image.bytes_per_row();
+        let data = cg_image.data();
+        let raw_data = data.bytes();
+
+        // CGImage is typically BGRA or RGBA depending on context
+        let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let offset = (y * bytes_per_row + x * 4) as usize;
+                if offset + 3 < raw_data.len() {
+                    // assume BGRA format (common on macOS)
+                    let b = raw_data[offset];
+                    let g = raw_data[offset + 1];
+                    let r = raw_data[offset + 2];
+                    let a = raw_data[offset + 3];
+                    rgba_data.push(r);
+                    rgba_data.push(g);
+                    rgba_data.push(b);
+                    rgba_data.push(a);
+                }
+            }
+        }
+
+        let img = image::RgbaImage::from_raw(width as u32, height as u32, rgba_data)
+            .ok_or_else(|| ComputerError::Screenshot("Failed to create image from raw data".to_string()))?;
+
+        let resized = DynamicImage::ImageRgba8(img)
+            .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Triangle);
+
         let mut buffer = Vec::new();
         resized
             .write_to(&mut Cursor::new(&mut buffer), image::ImageFormat::Jpeg)

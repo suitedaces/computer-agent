@@ -193,6 +193,21 @@ impl Agent {
                                 None,
                             );
 
+                            // get window id for native screenshot exclusion
+                            #[cfg(target_os = "macos")]
+                            let window_id: Option<u32> = {
+                                use tauri_nspanel::ManagerExt;
+                                app_handle.get_webview_panel("main").ok().map(|panel| {
+                                    let ns_panel = panel.as_panel();
+                                    unsafe {
+                                        let num: isize = objc2::msg_send![ns_panel, windowNumber];
+                                        num as u32
+                                    }
+                                })
+                            };
+                            #[cfg(not(target_os = "macos"))]
+                            let window_id: Option<u32> = None;
+
                             // execute action on blocking thread (enigo requires main-thread-like context)
                             let action_clone = action.clone();
                             let screen_w = {
@@ -211,15 +226,27 @@ impl Agent {
                             }).await.map_err(|e| AgentError::Computer(ComputerError::Input(e.to_string())))?;
 
                             match result {
-                                Ok(action_screenshot) => {
-                                    // if action was screenshot, use that result
-                                    // otherwise take a new screenshot after the action
-                                    let screenshot = if let Some(s) = action_screenshot {
-                                        s
-                                    } else {
-                                        let computer_guard = self.computer.lock().await;
-                                        let computer = computer_guard.as_ref().unwrap();
-                                        computer.take_screenshot()?
+                                Ok(_action_result) => {
+                                    // always take screenshot with window exclusion
+                                    let screenshot = {
+                                        #[cfg(target_os = "macos")]
+                                        {
+                                            if let Some(wid) = window_id {
+                                                let computer_guard = self.computer.lock().await;
+                                                let computer = computer_guard.as_ref().unwrap();
+                                                computer.take_screenshot_excluding(wid)?
+                                            } else {
+                                                let computer_guard = self.computer.lock().await;
+                                                let computer = computer_guard.as_ref().unwrap();
+                                                computer.take_screenshot()?
+                                            }
+                                        }
+                                        #[cfg(not(target_os = "macos"))]
+                                        {
+                                            let computer_guard = self.computer.lock().await;
+                                            let computer = computer_guard.as_ref().unwrap();
+                                            computer.take_screenshot()?
+                                        }
                                     };
 
                                     self.emit(

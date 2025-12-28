@@ -276,7 +276,7 @@ export default function App() {
                 className="flex flex-col items-center justify-center h-full pt-24 text-white/25"
               >
                 <img src="/vaporlofi.gif" alt="" className="w-[28rem] h-auto opacity-60" />
-                <p className="text-sm mt-4">what should I do?</p>
+                <p className="text-sm mt-4">sip coffee while ai takes over your computer</p>
               </motion.div>
             ) : (
               messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
