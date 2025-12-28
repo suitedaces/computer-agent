@@ -235,6 +235,17 @@ fn main() {
                 // mini panel - same setup as main for fullscreen support
                 if let Some(window) = app.get_webview_window("mini") {
                     println!("[setup] mini window found");
+
+                    // ensure mini window has ?mini=true in URL (for dev mode)
+                    if let Ok(url) = window.url() {
+                        println!("[setup] mini window url: {}", url);
+                        if !url.to_string().contains("mini") {
+                            let new_url = format!("{}?mini=true", url);
+                            println!("[setup] navigating mini to: {}", new_url);
+                            let _ = window.eval(&format!("window.location.href = '{}'", new_url));
+                        }
+                    }
+
                     if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
                         panel.set_level(PanelLevel::Floating.value());
                         panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());

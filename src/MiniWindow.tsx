@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -43,6 +43,7 @@ function truncate(text: string, max: number) {
 }
 
 export default function MiniWindow() {
+  console.log("[mini] MiniWindow component rendering");
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isRunning, setIsRunning] = useState(false);
@@ -77,14 +78,13 @@ export default function MiniWindow() {
 
   useEffect(() => {
     console.log("[mini] Setting up event listeners");
-    const webview = getCurrentWebviewWindow();
 
-    const unlisten1 = webview.listen<{ delta: string }>("agent:text_delta", (e) => {
+    const unlisten1 = listen<{ delta: string }>("agent:text_delta", (e) => {
       console.log("[mini] text_delta received");
       setStreamingText((prev) => prev + e.payload.delta);
     });
 
-    const unlisten2 = webview.listen("agent:message", () => {
+    const unlisten2 = listen("agent:message", () => {
       console.log("[mini] message received");
       // commit streaming text to feed
       setStreamingText((prev) => {
@@ -102,7 +102,7 @@ export default function MiniWindow() {
       });
     });
 
-    const unlisten3 = webview.listen<{ action: string; text?: string }>("agent:action", (e) => {
+    const unlisten3 = listen<{ action: string; text?: string }>("agent:action", (e) => {
       console.log("[mini] action received:", e.payload.action);
       const { action, text } = e.payload;
       let content = action;
@@ -124,7 +124,7 @@ export default function MiniWindow() {
       }]);
     });
 
-    const unlisten4 = webview.listen<{ command: string }>("agent:bash", (e) => {
+    const unlisten4 = listen<{ command: string }>("agent:bash", (e) => {
       console.log("[mini] bash received:", e.payload.command);
       setFeed((f) => [...f.slice(-20), {
         id: itemId++,
@@ -134,7 +134,7 @@ export default function MiniWindow() {
       }]);
     });
 
-    const unlisten5 = webview.listen<{ name: string }>("agent:mcp_tool", (e) => {
+    const unlisten5 = listen<{ name: string }>("agent:mcp_tool", (e) => {
       console.log("[mini] mcp_tool received:", e.payload.name);
       setFeed((f) => [...f.slice(-20), {
         id: itemId++,
@@ -144,14 +144,14 @@ export default function MiniWindow() {
       }]);
     });
 
-    const unlisten6 = webview.listen("agent:started", () => {
+    const unlisten6 = listen("agent:started", () => {
       console.log("[mini] started received");
       setIsRunning(true);
       setFeed([]);
       setStreamingText("");
     });
 
-    const unlisten7 = webview.listen("agent:stopped", () => {
+    const unlisten7 = listen("agent:stopped", () => {
       console.log("[mini] stopped received");
       setIsRunning(false);
       setStreamingText("");

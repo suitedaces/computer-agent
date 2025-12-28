@@ -130,7 +130,10 @@ impl Agent {
 
         // emit started to both windows
         self.emit(&app_handle, "started", "Agent started", None, None);
-        let _ = app_handle.emit_to("mini", "agent:started", ());
+        match app_handle.emit("agent:started", ()) {
+            Ok(_) => println!("[agent] agent:started emitted OK"),
+            Err(e) => println!("[agent] agent:started emit FAILED: {:?}", e),
+        }
         println!("[agent] Emitted started event");
 
         // add conversation history first
@@ -184,8 +187,8 @@ impl Agent {
                                     "text": text
                                 }));
                             }
-                            // also emit to mini window
-                            let _ = app_handle_clone.emit_to("mini", "agent:text_delta", serde_json::json!({ "delta": text }));
+                            // also emit globally for mini window
+                            let _ = app_handle_clone.emit("agent:text_delta", serde_json::json!({ "delta": text }));
                         }
                         StreamEvent::ToolUseStart { name, .. } => {
                             use tauri::Manager;
@@ -272,11 +275,14 @@ impl Agent {
                                 Some(input.clone()),
                                 None,
                             );
-                            // emit to mini
-                            let _ = app_handle.emit_to("mini", "agent:action", serde_json::json!({
+                            // emit globally for mini
+                            match app_handle.emit("agent:action", serde_json::json!({
                                 "action": action.action,
                                 "text": action.text
-                            }));
+                            })) {
+                                Ok(_) => println!("[agent] agent:action emitted OK"),
+                                Err(e) => println!("[agent] agent:action emit FAILED: {:?}", e),
+                            }
 
                             // get window id for native screenshot exclusion
                             #[cfg(target_os = "macos")]
@@ -386,8 +392,8 @@ impl Agent {
                                     format!("$ {}", cmd)
                                 };
                                 self.emit(&app_handle, "action", &preview, Some(input.clone()), None);
-                                // emit to mini
-                                let _ = app_handle.emit_to("mini", "agent:bash", serde_json::json!({ "command": cmd }));
+                                // emit globally for mini
+                                let _ = app_handle.emit("agent:bash", serde_json::json!({ "command": cmd }));
 
                                 // execute
                                 let bash = self.bash.lock().await;
@@ -428,8 +434,8 @@ impl Agent {
                                     Some(input.clone()),
                                     None,
                                 );
-                                // emit to mini
-                                let _ = app_handle.emit_to("mini", "agent:mcp_tool", serde_json::json!({ "name": name }));
+                                // emit globally for mini
+                                let _ = app_handle.emit("agent:mcp_tool", serde_json::json!({ "name": name }));
 
                                 let arguments = input.as_object().cloned();
                                 println!("[agent] MCP tool args: {:?}", arguments);
@@ -464,7 +470,7 @@ impl Agent {
             }
 
             // clear streaming text in mini on each message complete
-            let _ = app_handle.emit_to("mini", "agent:message", ());
+            let _ = app_handle.emit("agent:message", ());
 
             // check if stopped during tool execution
             if !self.running.load(Ordering::SeqCst) {
@@ -487,7 +493,7 @@ impl Agent {
         }
 
         self.running.store(false, Ordering::SeqCst);
-        let _ = app_handle.emit_to("mini", "agent:stopped", ());
+        let _ = app_handle.emit("agent:stopped", ());
         Ok(())
     }
 
