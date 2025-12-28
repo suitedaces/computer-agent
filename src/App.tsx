@@ -314,7 +314,7 @@ export default function App() {
                 className="flex flex-col items-center justify-center h-full pt-24 text-white/25"
               >
                 <img src="/vaporlofi.gif" alt="" className="w-[28rem] h-auto opacity-60" />
-                <p className="text-sm mt-4">sip coffee while ai takes over your computer</p>
+                <p className="text-sm mt-4 text-white/50">sip coffee while ai takes over your computer</p>
               </motion.div>
             ) : (
               <>
@@ -333,7 +333,7 @@ export default function App() {
 
       {/* input */}
       <div className="p-3 pt-0 shrink-0">
-        <div className="glass-card flex items-end gap-2 p-2">
+        <div className="glass-card flex items-center gap-2 p-2">
           <textarea
             ref={inputRef}
             value={inputText}
