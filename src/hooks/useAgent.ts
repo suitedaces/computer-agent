@@ -16,6 +16,8 @@ export function useAgent() {
     setScreenshot,
     setApiKeySet,
     setInputText,
+    appendStreamingText,
+    clearStreamingText,
   } = useAgentStore();
 
   // setup event listener
@@ -36,6 +38,7 @@ export function useAgent() {
           break;
 
         case "thinking":
+          clearStreamingText();
           addMessage({ role: "assistant", content: message, type: "thinking" });
           break;
 
@@ -85,10 +88,19 @@ export function useAgent() {
       invoke("debug_log", { message: `Event listener FAILED: ${err}` });
     });
 
+    // streaming event listener
+    const unlistenStreamPromise = listen<{ type: string; text?: string; name?: string }>("agent-stream", (event) => {
+      const { type, text } = event.payload;
+      if (type === "text_delta" && text) {
+        appendStreamingText(text);
+      }
+    });
+
     return () => {
       unlistenPromise.then((fn) => fn());
+      unlistenStreamPromise.then((fn) => fn());
     };
-  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setScreenshot, setApiKeySet]);
+  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setScreenshot, setApiKeySet, appendStreamingText, clearStreamingText]);
 
   const submit = useCallback(async () => {
     const text = inputText.trim();

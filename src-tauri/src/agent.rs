@@ -1,4 +1,4 @@
-use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, ToolResultContent};
+use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, StreamEvent, ToolResultContent};
 use crate::bash::BashExecutor;
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
 use serde::{Deserialize, Serialize};
@@ -120,12 +120,43 @@ impl Agent {
             iteration += 1;
             println!("[agent] Iteration {}", iteration);
 
-            // call API
-            println!("[agent] Calling Anthropic API...");
-            let response = match client.send_message(messages.clone()).await {
-                Ok(r) => {
-                    println!("[agent] API response received, {} blocks", r.content.len());
-                    r
+            // call API with streaming
+            println!("[agent] Calling Anthropic API (streaming)...");
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<StreamEvent>();
+
+            // spawn stream consumer to emit text deltas in real-time
+            let app_handle_clone = app_handle.clone();
+            let stream_task = tokio::spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    match event {
+                        StreamEvent::TextDelta { text, .. } => {
+                            // emit streaming text to frontend
+                            use tauri::Manager;
+                            if let Some(window) = app_handle_clone.get_webview_window("main") {
+                                let _ = window.emit("agent-stream", serde_json::json!({
+                                    "type": "text_delta",
+                                    "text": text
+                                }));
+                            }
+                        }
+                        StreamEvent::ToolUseStart { name, .. } => {
+                            use tauri::Manager;
+                            if let Some(window) = app_handle_clone.get_webview_window("main") {
+                                let _ = window.emit("agent-stream", serde_json::json!({
+                                    "type": "tool_start",
+                                    "name": name
+                                }));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
+            let response_content = match client.send_message_streaming(messages.clone(), event_tx).await {
+                Ok(content) => {
+                    println!("[agent] API streaming response complete, {} blocks", content.len());
+                    content
                 }
                 Err(e) => {
                     println!("[agent] API error: {:?}", e);
@@ -134,16 +165,19 @@ impl Agent {
                 }
             };
 
+            // wait for stream consumer to finish
+            let _ = stream_task.await;
+
             // add assistant response to history
             messages.push(Message {
                 role: "assistant".to_string(),
-                content: response.content.clone(),
+                content: response_content.clone(),
             });
 
             let mut tool_results: Vec<ContentBlock> = Vec::new();
             let mut should_finish = false;
 
-            for block in &response.content {
+            for block in &response_content {
                 if !self.running.load(Ordering::SeqCst) {
                     break;
                 }

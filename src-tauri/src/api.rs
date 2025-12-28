@@ -1,6 +1,8 @@
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const BETA_HEADER: &str = "computer-use-2025-01-24";
@@ -18,6 +20,8 @@ pub enum ApiError {
     Api(String),
     #[error("Parse error: {0}")]
     Parse(String),
+    #[error("Stream error: {0}")]
+    Stream(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,9 +56,9 @@ pub enum ToolResultContent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageSource {
     #[serde(rename = "type")]
-    pub source_type: String,  // "base64"
-    pub media_type: String,   // "image/png"
-    pub data: String,         // base64 encoded image
+    pub source_type: String,
+    pub media_type: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +74,7 @@ struct ApiRequest {
     system: String,
     tools: Vec<serde_json::Value>,
     messages: Vec<Message>,
+    stream: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +93,16 @@ struct ApiErrorDetail {
     message: String,
 }
 
+// streaming event types
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    TextDelta { index: usize, text: String },
+    ToolUseStart { index: usize, id: String, name: String },
+    InputJsonDelta { index: usize, partial_json: String },
+    ContentBlockStop { index: usize },
+    MessageStop,
+}
+
 pub struct AnthropicClient {
     client: Client,
     api_key: String,
@@ -103,9 +118,8 @@ impl AnthropicClient {
         }
     }
 
-    pub async fn send_message(&self, messages: Vec<Message>) -> Result<ApiResponse, ApiError> {
-        let tools = vec![
-            // computer use tool
+    fn build_tools(&self) -> Vec<serde_json::Value> {
+        vec![
             serde_json::json!({
                 "type": "computer_20250124",
                 "name": "computer",
@@ -113,12 +127,10 @@ impl AnthropicClient {
                 "display_height_px": DISPLAY_HEIGHT,
                 "display_number": 1
             }),
-            // bash tool
             serde_json::json!({
                 "type": "bash_20250124",
                 "name": "bash"
             }),
-            // finish_run tool
             serde_json::json!({
                 "name": "finish_run",
                 "description": "Call this tool when you have completed the user's task. Provide a brief summary of what was accomplished.",
@@ -137,14 +149,173 @@ impl AnthropicClient {
                     "required": ["success", "message"]
                 }
             }),
-        ];
+        ]
+    }
 
+    pub async fn send_message_streaming(
+        &self,
+        messages: Vec<Message>,
+        event_tx: mpsc::UnboundedSender<StreamEvent>,
+    ) -> Result<Vec<ContentBlock>, ApiError> {
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: 4096,
             system: SYSTEM_PROMPT.to_string(),
-            tools,
+            tools: self.build_tools(),
             messages,
+            stream: true,
+        };
+
+        let response = self
+            .client
+            .post(ANTHROPIC_API_URL)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", API_VERSION)
+            .header("anthropic-beta", BETA_HEADER)
+            .header("content-type", "application/json")
+            .json(&request)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await?;
+            if let Ok(err) = serde_json::from_str::<ApiErrorResponse>(&body) {
+                return Err(ApiError::Api(err.error.message));
+            }
+            return Err(ApiError::Api(format!("HTTP {}: {}", status, body)));
+        }
+
+        // parse SSE stream incrementally
+        let mut content_blocks: Vec<ContentBlock> = Vec::new();
+        let mut current_text: Vec<String> = Vec::new();
+        let mut current_tool_json: Vec<String> = Vec::new();
+        let mut tool_info: Vec<(String, String)> = Vec::new(); // (id, name)
+        let mut buffer = String::new();
+
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // process complete lines
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].trim().to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+
+                if !line.starts_with("data: ") {
+                    continue;
+                }
+
+                let data = &line[6..];
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                    let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                    match event_type {
+                        "content_block_start" => {
+                            let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                            if let Some(block) = event.get("content_block") {
+                                let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                                // ensure vectors are big enough
+                                while current_text.len() <= index {
+                                    current_text.push(String::new());
+                                }
+                                while current_tool_json.len() <= index {
+                                    current_tool_json.push(String::new());
+                                }
+                                while tool_info.len() <= index {
+                                    tool_info.push((String::new(), String::new()));
+                                }
+
+                                if block_type == "tool_use" {
+                                    let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                                    let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                                    tool_info[index] = (id.clone(), name.clone());
+                                    let _ = event_tx.send(StreamEvent::ToolUseStart { index, id, name });
+                                }
+                            }
+                        }
+
+                        "content_block_delta" => {
+                            let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                            if let Some(delta) = event.get("delta") {
+                                let delta_type = delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                                match delta_type {
+                                    "text_delta" => {
+                                        if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
+                                            while current_text.len() <= index {
+                                                current_text.push(String::new());
+                                            }
+                                            current_text[index].push_str(text);
+                                            let _ = event_tx.send(StreamEvent::TextDelta {
+                                                index,
+                                                text: text.to_string(),
+                                            });
+                                        }
+                                    }
+                                    "input_json_delta" => {
+                                        if let Some(json) = delta.get("partial_json").and_then(|j| j.as_str()) {
+                                            while current_tool_json.len() <= index {
+                                                current_tool_json.push(String::new());
+                                            }
+                                            current_tool_json[index].push_str(json);
+                                            let _ = event_tx.send(StreamEvent::InputJsonDelta {
+                                                index,
+                                                partial_json: json.to_string(),
+                                            });
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        "content_block_stop" => {
+                            let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                            let _ = event_tx.send(StreamEvent::ContentBlockStop { index });
+
+                            // finalize content block
+                            if index < current_text.len() && !current_text[index].is_empty() {
+                                content_blocks.push(ContentBlock::Text {
+                                    text: current_text[index].clone(),
+                                });
+                            } else if index < current_tool_json.len() && !current_tool_json[index].is_empty() {
+                                let (id, name) = if index < tool_info.len() {
+                                    tool_info[index].clone()
+                                } else {
+                                    (String::new(), String::new())
+                                };
+                                let input: serde_json::Value = serde_json::from_str(&current_tool_json[index])
+                                    .unwrap_or(serde_json::json!({}));
+                                content_blocks.push(ContentBlock::ToolUse { id, name, input });
+                            }
+                        }
+
+                        "message_stop" => {
+                            let _ = event_tx.send(StreamEvent::MessageStop);
+                        }
+
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        Ok(content_blocks)
+    }
+
+    // keep non-streaming version for fallback
+    pub async fn send_message(&self, messages: Vec<Message>) -> Result<ApiResponse, ApiError> {
+        let request = ApiRequest {
+            model: self.model.clone(),
+            max_tokens: 4096,
+            system: SYSTEM_PROMPT.to_string(),
+            tools: self.build_tools(),
+            messages,
+            stream: false,
         };
 
         let response = self
@@ -162,7 +333,6 @@ impl AnthropicClient {
         let body = response.text().await?;
 
         if !status.is_success() {
-            // try to parse error
             if let Ok(err) = serde_json::from_str::<ApiErrorResponse>(&body) {
                 return Err(ApiError::Api(err.error.message));
             }

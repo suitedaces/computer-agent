@@ -16,9 +16,11 @@
     "lucide-react": "^0.468",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "streamdown": "^1.6.10",
     "zustand": "^5"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

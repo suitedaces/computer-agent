@@ -30,6 +30,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   apiKeySet: false,
   inputText: "",
   selectedModel: "claude-haiku-4-5-20251001" as ModelId,
+  streamingText: "",
 
   setIsRunning: (running) => set({ isRunning: running }),
 
@@ -80,4 +81,10 @@ export const useAgentStore = create<AgentState>((set) => ({
   setSelectedModel: (selectedModel) => set({ selectedModel }),
 
   clearMessages: () => set({ messages: [] }),
+
+  appendStreamingText: (text) => set((state) => ({
+    streamingText: state.streamingText + text,
+  })),
+
+  clearStreamingText: () => set({ streamingText: "" }),
 }));

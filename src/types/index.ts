@@ -38,6 +38,7 @@ export interface AgentState {
   apiKeySet: boolean;
   inputText: string;
   selectedModel: ModelId;
+  streamingText: string;
 
   setIsRunning: (running: boolean) => void;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
@@ -48,4 +49,6 @@ export interface AgentState {
   setInputText: (text: string) => void;
   setSelectedModel: (model: ModelId) => void;
   clearMessages: () => void;
+  appendStreamingText: (text: string) => void;
+  clearStreamingText: () => void;
 }

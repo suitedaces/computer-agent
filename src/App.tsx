@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Streamdown } from "streamdown";
 import { useAgentStore } from "./stores/agentStore";
 import { useAgent } from "./hooks/useAgent";
 import { ChatMessage, ModelId } from "./types";
@@ -132,11 +133,17 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div className={`max-w-[85%] ${getBubbleStyle()}`}>
         <div className="flex items-start gap-2">
           {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
-          <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
-            {showSweep && <span className="sweep-text">{msg.content}</span>}
-            {isAction && !showSweep && msg.content}
-            {!isAction && msg.content}
-          </p>
+          {msg.type === "thinking" ? (
+            <div className="text-[13px] leading-relaxed text-white/90 prose prose-invert prose-sm max-w-none">
+              <Streamdown isAnimating={false}>{msg.content}</Streamdown>
+            </div>
+          ) : (
+            <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
+              {showSweep && <span className="sweep-text">{msg.content}</span>}
+              {isAction && !showSweep && msg.content}
+              {!isAction && msg.content}
+            </p>
+          )}
         </div>
       </div>
     </motion.div>
@@ -213,8 +220,28 @@ const MODELS: { id: ModelId; label: string }[] = [
   { id: "claude-opus-4-5", label: "Opus 4.5" },
 ];
 
+function StreamingBubble() {
+  const { streamingText, isRunning } = useAgentStore();
+
+  if (!streamingText) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex justify-start"
+    >
+      <div className="max-w-[85%] mr-8">
+        <div className="text-[13px] leading-relaxed text-white/90 prose prose-invert prose-sm max-w-none">
+          <Streamdown isAnimating={isRunning}>{streamingText}</Streamdown>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function App() {
-  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, streamingText } = useAgentStore();
   const { toggle, submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -269,7 +296,7 @@ export default function App() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
         <div className="space-y-2">
           <AnimatePresence mode="popLayout">
-            {messages.length === 0 ? (
+            {messages.length === 0 && !streamingText ? (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -279,7 +306,10 @@ export default function App() {
                 <p className="text-sm mt-4">sip coffee while ai takes over your computer</p>
               </motion.div>
             ) : (
-              messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
+              <>
+                {messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)}
+                <StreamingBubble />
+              </>
             )}
           </AnimatePresence>
         </div>
