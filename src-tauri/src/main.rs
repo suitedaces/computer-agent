@@ -19,7 +19,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Manager, State,
 };
-use tauri_plugin_positioner::{Position, WindowExt};
+use tauri::PhysicalPosition;
 
 #[cfg(target_os = "macos")]
 use tauri_nspanel::{
@@ -218,6 +218,9 @@ fn main() {
             {
                 // main panel
                 if let Some(window) = app.get_webview_window("main") {
+                    // pre-position offscreen to avoid flicker on first show
+                    let _ = window.set_position(PhysicalPosition::new(-1000, -1000));
+
                     if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
                         panel.set_level(PanelLevel::Floating.value());
                         panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
@@ -235,6 +238,9 @@ fn main() {
                 // mini panel - same setup as main for fullscreen support
                 if let Some(window) = app.get_webview_window("mini") {
                     println!("[setup] mini window found");
+
+                    // pre-position offscreen to avoid flicker on first show
+                    let _ = window.set_position(PhysicalPosition::new(-1000, -1000));
 
                     // ensure mini window has ?mini=true in URL (for dev mode)
                     if let Ok(url) = window.url() {
@@ -273,12 +279,24 @@ fn main() {
                     if let tauri::tray::TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Left,
                         button_state: tauri::tray::MouseButtonState::Up,
+                        rect,
                         ..
                     } = event
                     {
                         let app = tray.app_handle();
                         let state = app.state::<AppState>();
                         let is_running = state.running.load(std::sync::atomic::Ordering::SeqCst);
+
+                        // calculate position centered below tray icon
+                        let (tray_x, tray_bottom) = match (rect.position, rect.size) {
+                            (tauri::Position::Physical(pos), tauri::Size::Physical(size)) => {
+                                (pos.x, pos.y + size.height as i32)
+                            }
+                            (tauri::Position::Logical(pos), tauri::Size::Logical(size)) => {
+                                (pos.x as i32, (pos.y + size.height) as i32)
+                            }
+                            _ => (0, 0),
+                        };
 
                         #[cfg(target_os = "macos")]
                         {
@@ -291,9 +309,11 @@ fn main() {
                                     if is_running {
                                         println!("[tray] showing mini panel");
                                         if let Ok(mini_panel) = app.get_webview_panel("mini") {
-                                            // position mini under the tray icon (same as main)
                                             if let Some(mini_window) = app.get_webview_window("mini") {
-                                                let _ = mini_window.move_window(Position::TrayBottomCenter);
+                                                if let Ok(size) = mini_window.outer_size() {
+                                                    let x = tray_x - (size.width as i32 / 2);
+                                                    let _ = mini_window.set_position(PhysicalPosition::new(x, tray_bottom));
+                                                }
                                             }
                                             mini_panel.show();
                                         }
@@ -305,7 +325,10 @@ fn main() {
                                         mini_panel.hide();
                                     }
                                     if let Some(window) = app.get_webview_window("main") {
-                                        let _ = window.move_window(Position::TrayBottomCenter);
+                                        if let Ok(size) = window.outer_size() {
+                                            let x = tray_x - (size.width as i32 / 2);
+                                            let _ = window.set_position(PhysicalPosition::new(x, tray_bottom));
+                                        }
                                     }
                                     main_panel.show_and_make_key();
                                 }
@@ -324,7 +347,10 @@ fn main() {
                                 if let Some(mini) = app.get_webview_window("mini") {
                                     let _ = mini.hide();
                                 }
-                                let _ = window.move_window(Position::TrayBottomCenter);
+                                if let Ok(size) = window.outer_size() {
+                                    let x = tray_x - (size.width as i32 / 2);
+                                    let _ = window.set_position(PhysicalPosition::new(x, tray_bottom));
+                                }
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
