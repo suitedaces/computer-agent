@@ -36,10 +36,10 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new() -> Self {
+    pub fn new(running: Arc<AtomicBool>) -> Self {
         Self {
             api_key: None,
-            running: Arc::new(AtomicBool::new(false)),
+            running,
             computer: Mutex::new(None),
         }
     }

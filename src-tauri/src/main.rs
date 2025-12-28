@@ -30,6 +30,7 @@ tauri_panel! {
 
 struct AppState {
     agent: Arc<Mutex<Agent>>,
+    running: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[tauri::command]
@@ -77,16 +78,15 @@ async fn run_agent(
 }
 
 #[tauri::command]
-async fn stop_agent(state: State<'_, AppState>) -> Result<(), String> {
-    let agent = state.agent.lock().await;
-    agent.stop();
+fn stop_agent(state: State<'_, AppState>) -> Result<(), String> {
+    state.running.store(false, std::sync::atomic::Ordering::SeqCst);
+    println!("[grunty] Stop requested");
     Ok(())
 }
 
 #[tauri::command]
-async fn is_agent_running(state: State<'_, AppState>) -> Result<bool, String> {
-    let agent = state.agent.lock().await;
-    Ok(agent.is_running())
+fn is_agent_running(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.running.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 #[tauri::command]
@@ -100,7 +100,8 @@ fn main() {
         let _ = dotenvy::from_filename("../.env");
     }
 
-    let mut agent = Agent::new();
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut agent = Agent::new(running.clone());
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
         println!("[grunty] API key loaded");
@@ -119,6 +120,7 @@ fn main() {
     builder
         .manage(AppState {
             agent: Arc::new(Mutex::new(agent)),
+            running,
         })
         .setup(|app| {
             // hide from dock - menubar app only
