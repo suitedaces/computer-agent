@@ -1,8 +1,0 @@
-PyQt6
-pyautogui
-requests
-anthropic
-python-dotenv
-pillow
-numpy
-qtawesome
