@@ -139,6 +139,32 @@ async fn get_mcp_tools(state: State<'_, AppState>) -> Result<Vec<String>, String
     Ok(client.get_tool_names())
 }
 
+#[tauri::command]
+fn show_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app_handle.get_webview_panel("mini") {
+        panel.show();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.show();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app_handle.get_webview_panel("mini") {
+        panel.hide();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
 fn main() {
     // load .env
     if dotenvy::dotenv().is_err() {
@@ -187,20 +213,41 @@ fn main() {
             // hide from dock - menubar app only
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // convert window to panel for fullscreen support
+            // convert windows to panels for fullscreen support
             #[cfg(target_os = "macos")]
-            if let Some(window) = app.get_webview_window("main") {
-                if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
-                    panel.set_level(PanelLevel::Floating.value());
-                    panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
-                    panel.set_collection_behavior(
-                        CollectionBehavior::new()
-                            .full_screen_auxiliary()
-                            .can_join_all_spaces()
-                            .stationary()
-                            .into(),
-                    );
-                    panel.set_hides_on_deactivate(false);
+            {
+                // main panel
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
+                        panel.set_level(PanelLevel::Floating.value());
+                        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                        panel.set_collection_behavior(
+                            CollectionBehavior::new()
+                                .full_screen_auxiliary()
+                                .can_join_all_spaces()
+                                .stationary()
+                                .into(),
+                        );
+                        panel.set_hides_on_deactivate(false);
+                    }
+                }
+
+                // mini panel - same setup as main for fullscreen support
+                if let Some(window) = app.get_webview_window("mini") {
+                    println!("[setup] mini window found");
+                    if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
+                        panel.set_level(PanelLevel::Floating.value());
+                        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                        panel.set_collection_behavior(
+                            CollectionBehavior::new()
+                                .full_screen_auxiliary()
+                                .can_join_all_spaces()
+                                .stationary()
+                                .into(),
+                        );
+                        panel.set_hides_on_deactivate(false);
+                        println!("[setup] mini panel created");
+                    }
                 }
             }
 
@@ -219,22 +266,53 @@ fn main() {
                     } = event
                     {
                         let app = tray.app_handle();
+                        let state = app.state::<AppState>();
+                        let is_running = state.running.load(std::sync::atomic::Ordering::SeqCst);
+
                         #[cfg(target_os = "macos")]
-                        if let Ok(panel) = app.get_webview_panel("main") {
-                            if panel.is_visible() {
-                                panel.hide();
-                            } else {
-                                if let Some(window) = app.get_webview_window("main") {
-                                    let _ = window.move_window(Position::TrayBottomCenter);
+                        {
+                            println!("[tray] click, is_running={}", is_running);
+                            if let Ok(main_panel) = app.get_webview_panel("main") {
+                                if main_panel.is_visible() {
+                                    println!("[tray] hiding main panel");
+                                    main_panel.hide();
+                                    // show mini if agent is running
+                                    if is_running {
+                                        println!("[tray] showing mini panel");
+                                        if let Ok(mini_panel) = app.get_webview_panel("mini") {
+                                            // position mini under the tray icon (same as main)
+                                            if let Some(mini_window) = app.get_webview_window("mini") {
+                                                let _ = mini_window.move_window(Position::TrayBottomCenter);
+                                            }
+                                            mini_panel.show();
+                                        }
+                                    }
+                                } else {
+                                    // hide mini, show main
+                                    println!("[tray] hiding mini, showing main");
+                                    if let Ok(mini_panel) = app.get_webview_panel("mini") {
+                                        mini_panel.hide();
+                                    }
+                                    if let Some(window) = app.get_webview_window("main") {
+                                        let _ = window.move_window(Position::TrayBottomCenter);
+                                    }
+                                    main_panel.show_and_make_key();
                                 }
-                                panel.show_and_make_key();
                             }
                         }
                         #[cfg(not(target_os = "macos"))]
                         if let Some(window) = app.get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
+                                if is_running {
+                                    if let Some(mini) = app.get_webview_window("mini") {
+                                        let _ = mini.show();
+                                    }
+                                }
                             } else {
+                                if let Some(mini) = app.get_webview_window("mini") {
+                                    let _ = mini.hide();
+                                }
                                 let _ = window.move_window(Position::TrayBottomCenter);
                                 let _ = window.show();
                                 let _ = window.set_focus();
@@ -263,6 +341,8 @@ fn main() {
             disconnect_mcp,
             is_mcp_connected,
             get_mcp_tools,
+            show_mini_window,
+            hide_mini_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -128,8 +128,9 @@ impl Agent {
         let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
 
-        // emit started
+        // emit started to both windows
         self.emit(&app_handle, "started", "Agent started", None, None);
+        let _ = app_handle.emit_to("mini", "agent:started", ());
         println!("[agent] Emitted started event");
 
         // add conversation history first
@@ -183,6 +184,8 @@ impl Agent {
                                     "text": text
                                 }));
                             }
+                            // also emit to mini window
+                            let _ = app_handle_clone.emit_to("mini", "agent:text_delta", serde_json::json!({ "delta": text }));
                         }
                         StreamEvent::ToolUseStart { name, .. } => {
                             use tauri::Manager;
@@ -269,6 +272,11 @@ impl Agent {
                                 Some(input.clone()),
                                 None,
                             );
+                            // emit to mini
+                            let _ = app_handle.emit_to("mini", "agent:action", serde_json::json!({
+                                "action": action.action,
+                                "text": action.text
+                            }));
 
                             // get window id for native screenshot exclusion
                             #[cfg(target_os = "macos")]
@@ -378,6 +386,8 @@ impl Agent {
                                     format!("$ {}", cmd)
                                 };
                                 self.emit(&app_handle, "action", &preview, Some(input.clone()), None);
+                                // emit to mini
+                                let _ = app_handle.emit_to("mini", "agent:bash", serde_json::json!({ "command": cmd }));
 
                                 // execute
                                 let bash = self.bash.lock().await;
@@ -418,6 +428,8 @@ impl Agent {
                                     Some(input.clone()),
                                     None,
                                 );
+                                // emit to mini
+                                let _ = app_handle.emit_to("mini", "agent:mcp_tool", serde_json::json!({ "name": name }));
 
                                 let arguments = input.as_object().cloned();
                                 println!("[agent] MCP tool args: {:?}", arguments);
@@ -451,6 +463,16 @@ impl Agent {
                 }
             }
 
+            // clear streaming text in mini on each message complete
+            let _ = app_handle.emit_to("mini", "agent:message", ());
+
+            // check if stopped during tool execution
+            if !self.running.load(Ordering::SeqCst) {
+                println!("[agent] Stopped by user");
+                self.emit(&app_handle, "finished", "Stopped", None, None);
+                break;
+            }
+
             // if no tools were used, the task is complete
             if tool_results.is_empty() {
                 println!("[agent] No tool calls, task complete");
@@ -465,6 +487,7 @@ impl Agent {
         }
 
         self.running.store(false, Ordering::SeqCst);
+        let _ = app_handle.emit_to("mini", "agent:stopped", ());
         Ok(())
     }
 

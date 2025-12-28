@@ -243,8 +243,15 @@ impl ComputerControl {
 
             "type" => {
                 if let Some(text) = &action.text {
-                    enigo.text(text)
-                        .map_err(|e| ComputerError::Input(e.to_string()))?;
+                    #[cfg(target_os = "macos")]
+                    {
+                        self.type_text_applescript(text)?;
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        enigo.text(text)
+                            .map_err(|e| ComputerError::Input(e.to_string()))?;
+                    }
                 }
                 Ok(None)
             }
@@ -341,6 +348,30 @@ impl ComputerControl {
             enigo.key(*m, Direction::Release)
                 .map_err(|e| ComputerError::Input(e.to_string()))?;
         }
+
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn type_text_applescript(&self, text: &str) -> Result<(), ComputerError> {
+        use std::process::Command;
+
+        // escape quotes and backslashes for applescript
+        let escaped = text
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+
+        let script = format!(
+            r#"tell application "System Events" to keystroke "{}"
+"#,
+            escaped
+        );
+
+        Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| ComputerError::Input(e.to_string()))?;
 
         Ok(())
     }
