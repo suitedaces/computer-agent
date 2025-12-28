@@ -301,7 +301,7 @@ export default function App() {
             placeholder={isRunning ? "running..." : "what should I do?"}
             disabled={isRunning}
             rows={1}
-            className="flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1"
+            className="flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden"
             style={{ height: "24px" }}
             onInput={(e) => {
               const target = e.target as HTMLTextAreaElement;
