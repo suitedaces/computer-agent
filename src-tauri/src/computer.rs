@@ -1,10 +1,8 @@
 use enigo::{Enigo, Key, Keyboard, Mouse, Settings, Coordinate, Button, Direction};
+use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
-use std::io::Cursor;
-use std::thread;
-use std::time::Duration;
 use thiserror::Error;
 use xcap::Monitor;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -16,6 +14,9 @@ use core_graphics::window::{
     create_image, kCGWindowListOptionOnScreenBelowWindow,
     kCGWindowImageDefault, CGWindowID,
 };
+
+// jpeg quality (1-100) - lower = faster + smaller, 60 is good for screenshots
+const JPEG_QUALITY: u8 = 60;
 
 const AI_WIDTH: u32 = 1280;
 const AI_HEIGHT: u32 = 800;
@@ -79,14 +80,15 @@ impl ComputerControl {
             .capture_image()
             .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
 
-        // resize to AI space - use Triangle filter (fast, good enough for screenshots)
+        // resize with Nearest filter (fastest) - good enough for AI
         let resized = DynamicImage::ImageRgba8(image)
-            .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Triangle);
+            .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Nearest);
 
-        // encode as JPEG (much faster than PNG, still good quality)
-        let mut buffer = Vec::new();
-        resized
-            .write_to(&mut Cursor::new(&mut buffer), image::ImageFormat::Jpeg)
+        // encode jpeg with explicit quality control
+        let rgb = resized.to_rgb8();
+        let mut buffer = Vec::with_capacity(200_000); // pre-alloc ~200kb
+        let mut encoder = JpegEncoder::new_with_quality(&mut buffer, JPEG_QUALITY);
+        encoder.encode_image(&rgb)
             .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
 
         Ok(BASE64.encode(&buffer))
@@ -107,41 +109,38 @@ impl ComputerControl {
             kCGWindowImageDefault,
         ).ok_or_else(|| ComputerError::Screenshot("Failed to create CGImage".to_string()))?;
 
-        // convert CGImage to our format
         let width = cg_image.width();
         let height = cg_image.height();
         let bytes_per_row = cg_image.bytes_per_row();
         let data = cg_image.data();
         let raw_data = data.bytes();
 
-        // CGImage is typically BGRA or RGBA depending on context
-        let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
+        // fast BGRA -> RGB conversion (skip alpha, swap B/R) using chunks
+        // output is RGB for jpeg (no alpha needed)
+        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
         for y in 0..height {
+            let row_start = (y * bytes_per_row) as usize;
             for x in 0..width {
-                let offset = (y * bytes_per_row + x * 4) as usize;
-                if offset + 3 < raw_data.len() {
-                    // assume BGRA format (common on macOS)
-                    let b = raw_data[offset];
-                    let g = raw_data[offset + 1];
-                    let r = raw_data[offset + 2];
-                    let a = raw_data[offset + 3];
-                    rgba_data.push(r);
-                    rgba_data.push(g);
-                    rgba_data.push(b);
-                    rgba_data.push(a);
-                }
+                let offset = row_start + (x * 4) as usize;
+                // BGRA -> RGB (skip alpha)
+                rgb_data.push(raw_data[offset + 2]); // R
+                rgb_data.push(raw_data[offset + 1]); // G
+                rgb_data.push(raw_data[offset]);     // B
             }
         }
 
-        let img = image::RgbaImage::from_raw(width as u32, height as u32, rgba_data)
-            .ok_or_else(|| ComputerError::Screenshot("Failed to create image from raw data".to_string()))?;
+        let img = image::RgbImage::from_raw(width as u32, height as u32, rgb_data)
+            .ok_or_else(|| ComputerError::Screenshot("Failed to create image".to_string()))?;
 
-        let resized = DynamicImage::ImageRgba8(img)
-            .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Triangle);
+        // resize with Nearest (fastest)
+        let resized = DynamicImage::ImageRgb8(img)
+            .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Nearest);
 
-        let mut buffer = Vec::new();
-        resized
-            .write_to(&mut Cursor::new(&mut buffer), image::ImageFormat::Jpeg)
+        // encode jpeg with quality control
+        let rgb = resized.to_rgb8();
+        let mut buffer = Vec::with_capacity(200_000);
+        let mut encoder = JpegEncoder::new_with_quality(&mut buffer, JPEG_QUALITY);
+        encoder.encode_image(&rgb)
             .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
 
         Ok(BASE64.encode(&buffer))
@@ -163,7 +162,6 @@ impl ComputerControl {
                     enigo.move_mouse(x, y, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
                 }
-                thread::sleep(Duration::from_millis(50));
                 Ok(None)
             }
 
@@ -172,11 +170,9 @@ impl ComputerControl {
                     let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
                     enigo.move_mouse(x, y, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
                 }
                 enigo.button(Button::Left, Direction::Click)
                     .map_err(|e| ComputerError::Input(e.to_string()))?;
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
@@ -185,11 +181,9 @@ impl ComputerControl {
                     let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
                     enigo.move_mouse(x, y, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
                 }
                 enigo.button(Button::Right, Direction::Click)
                     .map_err(|e| ComputerError::Input(e.to_string()))?;
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
@@ -198,11 +192,9 @@ impl ComputerControl {
                     let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
                     enigo.move_mouse(x, y, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
                 }
                 enigo.button(Button::Middle, Direction::Click)
                     .map_err(|e| ComputerError::Input(e.to_string()))?;
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
@@ -211,14 +203,11 @@ impl ComputerControl {
                     let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
                     enigo.move_mouse(x, y, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
                 }
                 enigo.button(Button::Left, Direction::Click)
                     .map_err(|e| ComputerError::Input(e.to_string()))?;
-                thread::sleep(Duration::from_millis(50));
                 enigo.button(Button::Left, Direction::Click)
                     .map_err(|e| ComputerError::Input(e.to_string()))?;
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
@@ -227,14 +216,11 @@ impl ComputerControl {
                     let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
                     enigo.move_mouse(x, y, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
                 }
                 for _ in 0..3 {
                     enigo.button(Button::Left, Direction::Click)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
                 }
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
@@ -245,20 +231,13 @@ impl ComputerControl {
 
                     enigo.move_mouse(sx, sy, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
-
                     enigo.button(Button::Left, Direction::Press)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
-
                     enigo.move_mouse(ex, ey, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
-
                     enigo.button(Button::Left, Direction::Release)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
                 }
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
@@ -267,7 +246,6 @@ impl ComputerControl {
                     enigo.text(text)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
                 }
-                thread::sleep(Duration::from_millis(50));
                 Ok(None)
             }
 
@@ -275,7 +253,6 @@ impl ComputerControl {
                 if let Some(key_str) = &action.text {
                     self.press_key(&mut enigo, key_str)?;
                 }
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
@@ -284,7 +261,6 @@ impl ComputerControl {
                     let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
                     enigo.move_mouse(x, y, Coordinate::Abs)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
-                    thread::sleep(Duration::from_millis(50));
                 }
 
                 let amount = action.scroll_amount.unwrap_or(3);
@@ -298,7 +274,6 @@ impl ComputerControl {
                     _ => -amount,
                 };
 
-                // vertical scroll
                 if direction == "up" || direction == "down" {
                     enigo.scroll(scroll_amount, enigo::Axis::Vertical)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
@@ -306,13 +281,11 @@ impl ComputerControl {
                     enigo.scroll(scroll_amount, enigo::Axis::Horizontal)
                         .map_err(|e| ComputerError::Input(e.to_string()))?;
                 }
-                thread::sleep(Duration::from_millis(100));
                 Ok(None)
             }
 
             "wait" => {
-                // wait action - just sleep
-                thread::sleep(Duration::from_millis(500));
+                std::thread::sleep(std::time::Duration::from_millis(100));
                 Ok(None)
             }
 
