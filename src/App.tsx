@@ -81,6 +81,29 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
   );
 }
 
+function formatActionContent(msg: ChatMessage): React.ReactNode {
+  const action = msg.action;
+  if (!action) return msg.content;
+
+  const coord = action.coordinate;
+  const actionType = action.action;
+
+  if (actionType === "left_click" && coord) {
+    const label = msg.pending ? "Clicking" : "Clicked";
+    return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
+  }
+  if (actionType === "double_click" && coord) {
+    const label = msg.pending ? "Double clicking" : "Double clicked";
+    return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
+  }
+  if (actionType === "mouse_move" && coord) {
+    const label = msg.pending ? "Moving to" : "Moved to";
+    return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
+  }
+
+  return msg.content;
+}
+
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === "user";
 
@@ -139,8 +162,8 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               isAction ? (msg.pending ? "text-white/50 italic" : "text-white/50") :
               "text-white/90"
             }`}>
-              {showSweep && <span className="sweep-text">{msg.content}</span>}
-              {isAction && !showSweep && msg.content}
+              {showSweep && <span className="sweep-text">{formatActionContent(msg)}</span>}
+              {isAction && !showSweep && formatActionContent(msg)}
               {!isAction && msg.content}
             </p>
           )}
