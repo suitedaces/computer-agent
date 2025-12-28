@@ -34,6 +34,12 @@ pub struct AgentUpdate {
     pub exit_code: Option<i32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryMessage {
+    pub role: String,
+    pub content: String,
+}
+
 pub struct Agent {
     api_key: Option<String>,
     running: Arc<AtomicBool>,
@@ -71,9 +77,10 @@ impl Agent {
         &self,
         instructions: String,
         model: String,
+        history: Vec<HistoryMessage>,
         app_handle: AppHandle,
     ) -> Result<(), AgentError> {
-        println!("[agent] run() starting with: {} (model: {})", instructions, model);
+        println!("[agent] run() starting with: {} (model: {}, history: {} msgs)", instructions, model, history.len());
 
         let api_key = self.api_key.clone().ok_or(AgentError::NoApiKey)?;
         println!("[agent] API key present");
@@ -102,8 +109,15 @@ impl Agent {
         self.emit(&app_handle, "started", "Agent started", None, None);
         println!("[agent] Emitted started event");
 
-        // first message - just the user instructions
-        // claude will call screenshot action first to see the screen
+        // add conversation history first
+        for msg in history {
+            messages.push(Message {
+                role: msg.role,
+                content: vec![ContentBlock::Text { text: msg.content }],
+            });
+        }
+
+        // add current user instructions
         messages.push(Message {
             role: "user".to_string(),
             content: vec![ContentBlock::Text {

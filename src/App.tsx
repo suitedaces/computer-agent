@@ -272,7 +272,7 @@ function StreamingBubble() {
 
 export default function App() {
   const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, streamingText, streamingThinking } = useAgentStore();
-  const { toggle, submit, stop } = useAgent();
+  const { toggle, submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -288,16 +288,6 @@ export default function App() {
     inputRef.current?.focus();
   }, []);
 
-  // esc to stop
-  useEffect(() => {
-    const handleEsc = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape" && isRunning) {
-        stop();
-      }
-    };
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, [isRunning, stop]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {

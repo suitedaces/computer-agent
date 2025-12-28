@@ -9,6 +9,7 @@ export function useAgent() {
     isRunning,
     inputText,
     selectedModel,
+    messages,
     setIsRunning,
     addMessage,
     markLastActionComplete,
@@ -115,17 +116,22 @@ export function useAgent() {
     const text = inputText.trim();
     if (!text || isRunning) return;
 
+    // build history from past messages (user + assistant text only)
+    const history = messages
+      .filter(m => m.role === "user" || (m.role === "assistant" && m.type === "thinking"))
+      .map(m => ({ role: m.role, content: m.content }));
+
     // add user message
     addMessage({ role: "user", content: text });
     setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel });
+      await invoke("run_agent", { instructions: text, model: selectedModel, history });
     } catch (error) {
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, selectedModel, addMessage, setInputText, setIsRunning]);
+  }, [inputText, isRunning, selectedModel, messages, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {

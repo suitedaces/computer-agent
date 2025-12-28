@@ -251,7 +251,14 @@ impl ComputerControl {
 
             "key" => {
                 if let Some(key_str) = &action.text {
-                    self.press_key(&mut enigo, key_str)?;
+                    #[cfg(target_os = "macos")]
+                    {
+                        self.press_key_applescript(key_str)?;
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        self.press_key(&mut enigo, key_str)?;
+                    }
                 }
                 Ok(None)
             }
@@ -334,6 +341,61 @@ impl ComputerControl {
             enigo.key(*m, Direction::Release)
                 .map_err(|e| ComputerError::Input(e.to_string()))?;
         }
+
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn press_key_applescript(&self, key_str: &str) -> Result<(), ComputerError> {
+        use std::process::Command;
+
+        // parse the key combo (e.g. "cmd+t", "ctrl+shift+a")
+        let parts: Vec<&str> = key_str.split('+').collect();
+        let mut modifiers = Vec::new();
+        let mut main_key = String::new();
+
+        for part in parts {
+            let part_lower = part.to_lowercase();
+            match part_lower.as_str() {
+                "cmd" | "command" | "super" | "meta" => modifiers.push("command down"),
+                "ctrl" | "control" => modifiers.push("control down"),
+                "alt" | "option" => modifiers.push("option down"),
+                "shift" => modifiers.push("shift down"),
+                _ => main_key = part_lower,
+            }
+        }
+
+        // map key names to applescript key codes or key names
+        let key_code = match main_key.as_str() {
+            "return" | "enter" => "return",
+            "tab" => "tab",
+            "escape" | "esc" => "escape",
+            "space" => "space",
+            "delete" | "backspace" => "delete",
+            "up" | "uparrow" => "up arrow",
+            "down" | "downarrow" => "down arrow",
+            "left" | "leftarrow" => "left arrow",
+            "right" | "rightarrow" => "right arrow",
+            k => k,
+        };
+
+        let modifier_str = if modifiers.is_empty() {
+            String::new()
+        } else {
+            format!(" using {{{}}}", modifiers.join(", "))
+        };
+
+        let script = format!(
+            r#"tell application "System Events" to keystroke "{}"{}
+"#,
+            key_code, modifier_str
+        );
+
+        Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| ComputerError::Input(e.to_string()))?;
 
         Ok(())
     }

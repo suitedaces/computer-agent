@@ -10,7 +10,7 @@ mod api;
 mod bash;
 mod computer;
 
-use agent::Agent;
+use agent::{Agent, HistoryMessage};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{
@@ -56,10 +56,11 @@ async fn check_api_key(state: State<'_, AppState>) -> Result<bool, String> {
 async fn run_agent(
     instructions: String,
     model: String,
+    history: Vec<HistoryMessage>,
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[taskhomie] run_agent called with: {} (model: {})", instructions, model);
+    println!("[taskhomie] run_agent called with: {} (model: {}, history: {} msgs)", instructions, model, history.len());
 
     let agent = state.agent.clone();
 
@@ -75,7 +76,7 @@ async fn run_agent(
 
     tokio::spawn(async move {
         let agent_guard = agent.lock().await;
-        match agent_guard.run(instructions, model, app_handle).await {
+        match agent_guard.run(instructions, model, history, app_handle).await {
             Ok(_) => println!("[taskhomie] Agent finished"),
             Err(e) => println!("[taskhomie] Agent error: {:?}", e),
         }
