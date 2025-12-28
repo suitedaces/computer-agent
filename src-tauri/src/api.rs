@@ -42,6 +42,15 @@ pub enum ContentBlock {
         tool_use_id: String,
         content: Vec<ToolResultContent>,
     },
+    #[serde(rename = "thinking")]
+    Thinking {
+        thinking: String,
+        signature: String,
+    },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking {
+        data: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +77,13 @@ pub struct Message {
 }
 
 #[derive(Debug, Serialize)]
+struct ThinkingConfig {
+    #[serde(rename = "type")]
+    config_type: String,
+    budget_tokens: u32,
+}
+
+#[derive(Debug, Serialize)]
 struct ApiRequest {
     model: String,
     max_tokens: u32,
@@ -75,6 +91,7 @@ struct ApiRequest {
     tools: Vec<serde_json::Value>,
     messages: Vec<Message>,
     stream: bool,
+    thinking: ThinkingConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +114,7 @@ struct ApiErrorDetail {
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     TextDelta { index: usize, text: String },
+    ThinkingDelta { index: usize, thinking: String },
     ToolUseStart { index: usize, id: String, name: String },
     InputJsonDelta { index: usize, partial_json: String },
     ContentBlockStop { index: usize },
@@ -159,11 +177,15 @@ impl AnthropicClient {
     ) -> Result<Vec<ContentBlock>, ApiError> {
         let request = ApiRequest {
             model: self.model.clone(),
-            max_tokens: 4096,
+            max_tokens: 16000,
             system: SYSTEM_PROMPT.to_string(),
             tools: self.build_tools(),
             messages,
             stream: true,
+            thinking: ThinkingConfig {
+                config_type: "enabled".to_string(),
+                budget_tokens: 5000,
+            },
         };
 
         let response = self
@@ -189,8 +211,11 @@ impl AnthropicClient {
         // parse SSE stream incrementally
         let mut content_blocks: Vec<ContentBlock> = Vec::new();
         let mut current_text: Vec<String> = Vec::new();
+        let mut current_thinking: Vec<String> = Vec::new();
+        let mut thinking_signature: Vec<String> = Vec::new();
         let mut current_tool_json: Vec<String> = Vec::new();
         let mut tool_info: Vec<(String, String)> = Vec::new(); // (id, name)
+        let mut block_types: Vec<String> = Vec::new(); // track block type per index
         let mut buffer = String::new();
 
         let mut stream = response.bytes_stream();
@@ -222,12 +247,22 @@ impl AnthropicClient {
                                 while current_text.len() <= index {
                                     current_text.push(String::new());
                                 }
+                                while current_thinking.len() <= index {
+                                    current_thinking.push(String::new());
+                                }
+                                while thinking_signature.len() <= index {
+                                    thinking_signature.push(String::new());
+                                }
                                 while current_tool_json.len() <= index {
                                     current_tool_json.push(String::new());
                                 }
                                 while tool_info.len() <= index {
                                     tool_info.push((String::new(), String::new()));
                                 }
+                                while block_types.len() <= index {
+                                    block_types.push(String::new());
+                                }
+                                block_types[index] = block_type.to_string();
 
                                 if block_type == "tool_use" {
                                     let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
@@ -244,6 +279,26 @@ impl AnthropicClient {
                                 let delta_type = delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                                 match delta_type {
+                                    "thinking_delta" => {
+                                        if let Some(thinking) = delta.get("thinking").and_then(|t| t.as_str()) {
+                                            while current_thinking.len() <= index {
+                                                current_thinking.push(String::new());
+                                            }
+                                            current_thinking[index].push_str(thinking);
+                                            let _ = event_tx.send(StreamEvent::ThinkingDelta {
+                                                index,
+                                                thinking: thinking.to_string(),
+                                            });
+                                        }
+                                    }
+                                    "signature_delta" => {
+                                        if let Some(sig) = delta.get("signature").and_then(|s| s.as_str()) {
+                                            while thinking_signature.len() <= index {
+                                                thinking_signature.push(String::new());
+                                            }
+                                            thinking_signature[index].push_str(sig);
+                                        }
+                                    }
                                     "text_delta" => {
                                         if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
                                             while current_text.len() <= index {
@@ -277,20 +332,47 @@ impl AnthropicClient {
                             let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
                             let _ = event_tx.send(StreamEvent::ContentBlockStop { index });
 
-                            // finalize content block
-                            if index < current_text.len() && !current_text[index].is_empty() {
-                                content_blocks.push(ContentBlock::Text {
-                                    text: current_text[index].clone(),
-                                });
-                            } else if index < current_tool_json.len() && !current_tool_json[index].is_empty() {
-                                let (id, name) = if index < tool_info.len() {
-                                    tool_info[index].clone()
-                                } else {
-                                    (String::new(), String::new())
-                                };
-                                let input: serde_json::Value = serde_json::from_str(&current_tool_json[index])
-                                    .unwrap_or(serde_json::json!({}));
-                                content_blocks.push(ContentBlock::ToolUse { id, name, input });
+                            // finalize content block based on tracked type
+                            let block_type = if index < block_types.len() {
+                                block_types[index].as_str()
+                            } else {
+                                ""
+                            };
+
+                            match block_type {
+                                "thinking" => {
+                                    if index < current_thinking.len() && !current_thinking[index].is_empty() {
+                                        let sig = if index < thinking_signature.len() {
+                                            thinking_signature[index].clone()
+                                        } else {
+                                            String::new()
+                                        };
+                                        content_blocks.push(ContentBlock::Thinking {
+                                            thinking: current_thinking[index].clone(),
+                                            signature: sig,
+                                        });
+                                    }
+                                }
+                                "text" => {
+                                    if index < current_text.len() && !current_text[index].is_empty() {
+                                        content_blocks.push(ContentBlock::Text {
+                                            text: current_text[index].clone(),
+                                        });
+                                    }
+                                }
+                                "tool_use" => {
+                                    if index < current_tool_json.len() && !current_tool_json[index].is_empty() {
+                                        let (id, name) = if index < tool_info.len() {
+                                            tool_info[index].clone()
+                                        } else {
+                                            (String::new(), String::new())
+                                        };
+                                        let input: serde_json::Value = serde_json::from_str(&current_tool_json[index])
+                                            .unwrap_or(serde_json::json!({}));
+                                        content_blocks.push(ContentBlock::ToolUse { id, name, input });
+                                    }
+                                }
+                                _ => {}
                             }
                         }
 
@@ -311,11 +393,15 @@ impl AnthropicClient {
     pub async fn send_message(&self, messages: Vec<Message>) -> Result<ApiResponse, ApiError> {
         let request = ApiRequest {
             model: self.model.clone(),
-            max_tokens: 4096,
+            max_tokens: 16000,
             system: SYSTEM_PROMPT.to_string(),
             tools: self.build_tools(),
             messages,
             stream: false,
+            thinking: ThinkingConfig {
+                config_type: "enabled".to_string(),
+                budget_tokens: 5000,
+            },
         };
 
         let response = self

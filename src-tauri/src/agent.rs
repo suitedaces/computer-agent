@@ -129,8 +129,16 @@ impl Agent {
             let stream_task = tokio::spawn(async move {
                 while let Some(event) = event_rx.recv().await {
                     match event {
+                        StreamEvent::ThinkingDelta { thinking, .. } => {
+                            use tauri::Manager;
+                            if let Some(window) = app_handle_clone.get_webview_window("main") {
+                                let _ = window.emit("agent-stream", serde_json::json!({
+                                    "type": "thinking_delta",
+                                    "text": thinking
+                                }));
+                            }
+                        }
                         StreamEvent::TextDelta { text, .. } => {
-                            // emit streaming text to frontend
                             use tauri::Manager;
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
                                 let _ = window.emit("agent-stream", serde_json::json!({
@@ -185,9 +193,18 @@ impl Agent {
                 println!("[agent] Processing block: {:?}", block);
 
                 match block {
+                    ContentBlock::Thinking { thinking, .. } => {
+                        println!("[agent] Thinking: {}...", &thinking[..thinking.len().min(100)]);
+                        self.emit(&app_handle, "thinking", thinking, None, None);
+                    }
+
+                    ContentBlock::RedactedThinking { .. } => {
+                        // keep in history but don't display
+                    }
+
                     ContentBlock::Text { text } => {
                         println!("[agent] Text: {}", text);
-                        self.emit(&app_handle, "thinking", text, None, None);
+                        self.emit(&app_handle, "response", text, None, None);
                     }
 
                     ContentBlock::ToolUse { id, name, input } => {

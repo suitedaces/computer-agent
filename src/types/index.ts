@@ -1,5 +1,5 @@
 export interface AgentUpdate {
-  update_type: "started" | "thinking" | "action" | "screenshot" | "finished" | "error" | "bash_result";
+  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result";
   message: string;
   action?: ComputerAction;
   screenshot?: string;
@@ -39,6 +39,7 @@ export interface AgentState {
   inputText: string;
   selectedModel: ModelId;
   streamingText: string;
+  streamingThinking: string;
 
   setIsRunning: (running: boolean) => void;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
@@ -51,4 +52,6 @@ export interface AgentState {
   clearMessages: () => void;
   appendStreamingText: (text: string) => void;
   clearStreamingText: () => void;
+  appendStreamingThinking: (text: string) => void;
+  clearStreamingThinking: () => void;
 }

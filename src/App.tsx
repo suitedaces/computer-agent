@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   Monitor,
+  Brain,
 } from "lucide-react";
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
@@ -101,8 +102,6 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
         return <MousePointer2 size={14} />;
       case "error":
         return <AlertCircle size={14} />;
-      case "info":
-        return <CheckCircle size={14} />;
       default:
         return null;
     }
@@ -220,6 +219,38 @@ const MODELS: { id: ModelId; label: string }[] = [
   { id: "claude-opus-4-5", label: "Opus 4.5" },
 ];
 
+function ThinkingBubble() {
+  const { streamingThinking, isRunning } = useAgentStore();
+  const [expanded, setExpanded] = useState(false);
+
+  if (!streamingThinking) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex justify-start"
+    >
+      <div className="w-full">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1.5 text-[10px] text-white/40 hover:text-white/60 transition-colors mb-1"
+        >
+          <Brain size={10} className={isRunning ? "animate-pulse" : ""} />
+          <span>thinking</span>
+          {isRunning && <span className="animate-pulse">...</span>}
+          <span className="ml-1">
+            {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+          </span>
+        </button>
+        <div className={`text-[11px] leading-relaxed text-white/50 overflow-hidden transition-all ${expanded ? "max-h-[300px]" : "max-h-[60px]"} overflow-y-auto`}>
+          <Streamdown isAnimating={isRunning}>{streamingThinking}</Streamdown>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 function StreamingBubble() {
   const { streamingText, isRunning } = useAgentStore();
 
@@ -241,17 +272,17 @@ function StreamingBubble() {
 }
 
 export default function App() {
-  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, streamingText } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, streamingText, streamingThinking } = useAgentStore();
   const { toggle, submit, stop } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // auto-scroll
+  // auto-scroll on messages, streaming text, or thinking
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, streamingText, streamingThinking]);
 
   // focus input on mount
   useEffect(() => {
@@ -307,7 +338,7 @@ export default function App() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
         <div className="space-y-2">
           <AnimatePresence mode="popLayout">
-            {messages.length === 0 && !streamingText ? (
+            {messages.length === 0 && !streamingText && !streamingThinking ? (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -319,6 +350,7 @@ export default function App() {
             ) : (
               <>
                 {messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)}
+                <ThinkingBubble />
                 <StreamingBubble />
               </>
             )}

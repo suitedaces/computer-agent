@@ -18,6 +18,8 @@ export function useAgent() {
     setInputText,
     appendStreamingText,
     clearStreamingText,
+    appendStreamingThinking,
+    clearStreamingThinking,
   } = useAgentStore();
 
   // setup event listener
@@ -38,8 +40,13 @@ export function useAgent() {
           break;
 
         case "thinking":
-          clearStreamingText();
+          clearStreamingThinking();
           addMessage({ role: "assistant", content: message, type: "thinking" });
+          break;
+
+        case "response":
+          clearStreamingText();
+          addMessage({ role: "assistant", content: message, type: "info" });
           break;
 
         case "action":
@@ -91,7 +98,9 @@ export function useAgent() {
     // streaming event listener
     const unlistenStreamPromise = listen<{ type: string; text?: string; name?: string }>("agent-stream", (event) => {
       const { type, text } = event.payload;
-      if (type === "text_delta" && text) {
+      if (type === "thinking_delta" && text) {
+        appendStreamingThinking(text);
+      } else if (type === "text_delta" && text) {
         appendStreamingText(text);
       }
     });
@@ -100,7 +109,7 @@ export function useAgent() {
       unlistenPromise.then((fn) => fn());
       unlistenStreamPromise.then((fn) => fn());
     };
-  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setScreenshot, setApiKeySet, appendStreamingText, clearStreamingText]);
+  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setScreenshot, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking]);
 
   const submit = useCallback(async () => {
     const text = inputText.trim();

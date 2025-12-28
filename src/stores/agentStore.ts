@@ -31,6 +31,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   inputText: "",
   selectedModel: "claude-haiku-4-5-20251001" as ModelId,
   streamingText: "",
+  streamingThinking: "",
 
   setIsRunning: (running) => set({ isRunning: running }),
 
@@ -87,4 +88,10 @@ export const useAgentStore = create<AgentState>((set) => ({
   })),
 
   clearStreamingText: () => set({ streamingText: "" }),
+
+  appendStreamingThinking: (text) => set((state) => ({
+    streamingThinking: state.streamingThinking + text,
+  })),
+
+  clearStreamingThinking: () => set({ streamingThinking: "" }),
 }));
