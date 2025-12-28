@@ -26,3 +26,6 @@ src-tauri/gen/
 
 # Docs (reference only, not tracked)
 /docs/
+
+# Claude skills
+.claude/skills/
