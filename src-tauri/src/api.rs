@@ -136,8 +136,8 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self) -> Vec<serde_json::Value> {
-        vec![
+    fn build_tools(&self, mcp_tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+        let mut tools = vec![
             serde_json::json!({
                 "type": "computer_20250124",
                 "name": "computer",
@@ -149,19 +149,22 @@ impl AnthropicClient {
                 "type": "bash_20250124",
                 "name": "bash"
             }),
-        ]
+        ];
+        tools.extend(mcp_tools.iter().cloned());
+        tools
     }
 
     pub async fn send_message_streaming(
         &self,
         messages: Vec<Message>,
         event_tx: mpsc::UnboundedSender<StreamEvent>,
+        mcp_tools: &[serde_json::Value],
     ) -> Result<Vec<ContentBlock>, ApiError> {
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: 16000,
             system: SYSTEM_PROMPT.to_string(),
-            tools: self.build_tools(),
+            tools: self.build_tools(mcp_tools),
             messages,
             stream: true,
             thinking: ThinkingConfig {
@@ -372,12 +375,12 @@ impl AnthropicClient {
     }
 
     // keep non-streaming version for fallback
-    pub async fn send_message(&self, messages: Vec<Message>) -> Result<ApiResponse, ApiError> {
+    pub async fn send_message(&self, messages: Vec<Message>, mcp_tools: &[serde_json::Value]) -> Result<ApiResponse, ApiError> {
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: 16000,
             system: SYSTEM_PROMPT.to_string(),
-            tools: self.build_tools(),
+            tools: self.build_tools(mcp_tools),
             messages,
             stream: false,
             thinking: ThinkingConfig {

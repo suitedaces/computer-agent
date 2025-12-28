@@ -9,8 +9,10 @@ mod agent;
 mod api;
 mod bash;
 mod computer;
+mod mcp;
 
 use agent::{Agent, HistoryMessage};
+use mcp::{create_shared_client, SharedMcpClient};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{
@@ -37,6 +39,7 @@ tauri_panel! {
 struct AppState {
     agent: Arc<Mutex<Agent>>,
     running: Arc<std::sync::atomic::AtomicBool>,
+    mcp_client: SharedMcpClient,
 }
 
 #[tauri::command]
@@ -102,6 +105,40 @@ fn debug_log(message: String) {
     println!("[frontend] {}", message);
 }
 
+#[tauri::command]
+async fn connect_mcp(
+    command: String,
+    args: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let mut client = state.mcp_client.write().await;
+    client
+        .connect(&command, &args_refs)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(client.get_tool_names())
+}
+
+#[tauri::command]
+async fn disconnect_mcp(state: State<'_, AppState>) -> Result<(), String> {
+    let mut client = state.mcp_client.write().await;
+    client.disconnect().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn is_mcp_connected(state: State<'_, AppState>) -> Result<bool, String> {
+    let client = state.mcp_client.read().await;
+    Ok(client.is_connected())
+}
+
+#[tauri::command]
+async fn get_mcp_tools(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let client = state.mcp_client.read().await;
+    Ok(client.get_tool_names())
+}
+
 fn main() {
     // load .env
     if dotenvy::dotenv().is_err() {
@@ -109,12 +146,27 @@ fn main() {
     }
 
     let running = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mcp_client = create_shared_client();
     let mut agent = Agent::new(running.clone());
+    agent.set_mcp_client(mcp_client.clone());
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
         println!("[taskhomie] API key loaded");
         agent.set_api_key(key);
     }
+
+    // auto-connect to chrome-devtools-mcp on startup
+    let mcp_client_clone = mcp_client.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut client = mcp_client_clone.write().await;
+            match client.connect("npx", &["-y", "chrome-devtools-mcp@latest"]).await {
+                Ok(()) => println!("[taskhomie] chrome-devtools-mcp connected"),
+                Err(e) => println!("[taskhomie] chrome-devtools-mcp failed to connect: {}", e),
+            }
+        });
+    });
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -129,6 +181,7 @@ fn main() {
         .manage(AppState {
             agent: Arc::new(Mutex::new(agent)),
             running,
+            mcp_client,
         })
         .setup(|app| {
             // hide from dock - menubar app only
@@ -206,6 +259,10 @@ fn main() {
             stop_agent,
             is_agent_running,
             debug_log,
+            connect_mcp,
+            disconnect_mcp,
+            is_mcp_connected,
+            get_mcp_tools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

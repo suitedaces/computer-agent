@@ -43,6 +43,9 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
+# mcp client
+rmcp = { version = "0.9", features = ["client", "transport-child-process"] }
+
 # allocator
 mimalloc = "0.1"
 

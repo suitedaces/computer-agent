@@ -1,6 +1,7 @@
 use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, StreamEvent, ToolResultContent};
 use crate::bash::BashExecutor;
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
+use crate::mcp::{McpClient, McpError, SharedMcpClient};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -14,6 +15,8 @@ pub enum AgentError {
     Api(#[from] ApiError),
     #[error("Computer error: {0}")]
     Computer(#[from] ComputerError),
+    #[error("MCP error: {0}")]
+    Mcp(#[from] McpError),
     #[error("Stopped by user")]
     Stopped,
     #[error("No API key set")]
@@ -45,6 +48,7 @@ pub struct Agent {
     running: Arc<AtomicBool>,
     computer: Mutex<Option<ComputerControl>>,
     bash: Mutex<BashExecutor>,
+    mcp_client: Option<SharedMcpClient>,
 }
 
 impl Agent {
@@ -54,7 +58,12 @@ impl Agent {
             running,
             computer: Mutex::new(None),
             bash: Mutex::new(BashExecutor::new()),
+            mcp_client: None,
         }
+    }
+
+    pub fn set_mcp_client(&mut self, client: SharedMcpClient) {
+        self.mcp_client = Some(client);
     }
 
     pub fn set_api_key(&mut self, key: String) {
@@ -101,6 +110,20 @@ impl Agent {
         *self.computer.lock().await = Some(computer);
 
         self.running.store(true, Ordering::SeqCst);
+
+        // get mcp tools if client is connected
+        let mcp_tools = if let Some(ref mcp_client) = self.mcp_client {
+            let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
+            if client.is_connected() {
+                let tools = client.get_tools_for_claude();
+                println!("[agent] MCP tools available: {}", tools.len());
+                tools
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
 
         let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
@@ -175,7 +198,7 @@ impl Agent {
                 }
             });
 
-            let response_content = match client.send_message_streaming(messages.clone(), event_tx).await {
+            let response_content = match client.send_message_streaming(messages.clone(), event_tx, &mcp_tools).await {
                 Ok(content) => {
                     println!("[agent] API streaming response complete, {} blocks", content.len());
                     content
@@ -378,6 +401,48 @@ impl Agent {
                                     tool_use_id: id.clone(),
                                     content: vec![ToolResultContent::Text { text: output }],
                                 });
+                            }
+                        } else if let Some(ref mcp_client) = self.mcp_client {
+                            // check if it's an mcp tool
+                            let is_mcp_tool = {
+                                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
+                                client.has_tool(name)
+                            };
+
+                            if is_mcp_tool {
+                                println!("[agent] Calling MCP tool: {}", name);
+                                self.emit(
+                                    &app_handle,
+                                    "action",
+                                    &format!("MCP: {}", name),
+                                    Some(input.clone()),
+                                    None,
+                                );
+
+                                let arguments = input.as_object().cloned();
+                                println!("[agent] MCP tool args: {:?}", arguments);
+                                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
+                                let result: Result<String, McpError> = client.call_tool(name, arguments).await;
+
+                                match result {
+                                    Ok(output) => {
+                                        println!("[agent] MCP tool success: {}", &output[..output.len().min(200)]);
+                                        self.emit(&app_handle, "mcp_result", &output, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: output }],
+                                        });
+                                    }
+                                    Err(e) => {
+                                        let err_msg = format!("MCP error: {}", e);
+                                        println!("[agent] MCP tool failed: {}", err_msg);
+                                        self.emit(&app_handle, "error", &err_msg, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: err_msg }],
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
