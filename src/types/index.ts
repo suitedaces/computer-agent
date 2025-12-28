@@ -22,6 +22,7 @@ export interface ChatMessage {
   type?: "thinking" | "action" | "error" | "info";
   action?: ComputerAction;
   screenshot?: string;
+  pending?: boolean;
 }
 
 export interface AgentState {
@@ -33,6 +34,7 @@ export interface AgentState {
 
   setIsRunning: (running: boolean) => void;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
+  markLastActionComplete: () => void;
   setScreenshot: (screenshot: string | null) => void;
   setApiKeySet: (set: boolean) => void;
   setInputText: (text: string) => void;

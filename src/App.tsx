@@ -48,14 +48,14 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     switch (msg.type) {
       case "error":
         return "bg-red-500/20 border-red-400/30 mr-8 px-3 py-2 rounded-2xl border backdrop-blur-sm";
-      case "action":
-        return "bg-purple-500/20 border-purple-400/30 mr-8 px-3 py-2 rounded-2xl border backdrop-blur-sm";
       default:
         return "mr-8";
     }
   };
 
   const icon = getIcon();
+  const isAction = msg.type === "action";
+  const showSweep = isAction && msg.pending;
 
   return (
     <motion.div
@@ -66,8 +66,10 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div className={`max-w-[85%] ${getBubbleStyle()}`}>
         <div className="flex items-start gap-2">
           {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
-          <p className="text-[13px] text-white/90 leading-relaxed break-words">
-            {msg.content}
+          <p className={`text-[13px] leading-relaxed break-words ${isAction ? "text-white/50 italic" : "text-white/90"}`}>
+            {showSweep && <span className="sweep-text">{msg.content}</span>}
+            {isAction && !showSweep && msg.content}
+            {!isAction && msg.content}
           </p>
         </div>
       </div>
@@ -155,7 +157,7 @@ export default function App() {
   const canSubmit = inputText.trim().length > 0 || isRunning;
 
   return (
-    <div className="h-screen flex flex-col bg-black/85 backdrop-blur-2xl overflow-hidden">
+    <div className="h-screen flex flex-col bg-black/85 backdrop-blur-2xl overflow-hidden rounded-xl">
       {/* titlebar */}
       <div className="titlebar h-11 flex items-center justify-center border-b border-white/5 shrink-0">
         <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">

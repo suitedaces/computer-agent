@@ -21,6 +21,11 @@ html, body, #root {
   background: transparent;
 }
 
+#root {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -173,3 +178,23 @@ body {
 .action-icon.screenshot { background: rgba(34, 197, 94, 0.2); }
 .action-icon.scroll { background: rgba(251, 146, 60, 0.2); }
 .action-icon.key { background: rgba(236, 72, 153, 0.2); }
+
+/* sweep text animation */
+.sweep-text {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0.3) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sweep 1.5s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}

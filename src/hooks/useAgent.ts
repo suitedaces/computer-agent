@@ -10,6 +10,7 @@ export function useAgent() {
     inputText,
     setIsRunning,
     addMessage,
+    markLastActionComplete,
     setScreenshot,
     setApiKeySet,
     setInputText,
@@ -46,6 +47,7 @@ export function useAgent() {
           break;
 
         case "screenshot":
+          markLastActionComplete();
           if (screenshot) {
             setScreenshot(screenshot);
           }
@@ -71,7 +73,7 @@ export function useAgent() {
     return () => {
       unlistenPromise.then((fn) => fn());
     };
-  }, [setIsRunning, addMessage, setScreenshot, setApiKeySet]);
+  }, [setIsRunning, addMessage, markLastActionComplete, setScreenshot, setApiKeySet]);
 
   const submit = useCallback(async () => {
     const text = inputText.trim();
