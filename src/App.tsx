@@ -129,8 +129,8 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div className={getBubbleStyle()}>
         <div className="flex items-start gap-2">
           {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
-          {msg.type === "thinking" ? (
-            <div className="text-[13px] leading-relaxed text-white/90 prose prose-invert prose-sm max-w-none">
+          {msg.type === "thinking" || msg.type === "info" ? (
+            <div className={`text-[13px] leading-relaxed prose prose-invert prose-sm max-w-none ${msg.type === "thinking" ? "text-white/90" : "text-white/90"}`}>
               <Streamdown isAnimating={false}>{msg.content}</Streamdown>
             </div>
           ) : (

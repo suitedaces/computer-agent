@@ -222,3 +222,87 @@ body {
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
 }
+
+/* prose overrides for glass theme */
+.prose {
+  --tw-prose-body: rgba(255, 255, 255, 0.9);
+  --tw-prose-headings: rgba(255, 255, 255, 0.95);
+  --tw-prose-bold: rgba(255, 255, 255, 0.95);
+  --tw-prose-links: #60a5fa;
+  --tw-prose-code: #f472b6;
+  --tw-prose-hr: rgba(255, 255, 255, 0.1);
+}
+
+.prose h1 { font-size: 1.1em; }
+.prose h2 { font-size: 1em; }
+.prose h3 { font-size: 0.95em; }
+.prose h4 { font-size: 0.9em; }
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+  font-weight: 600;
+}
+
+.prose p {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.prose ul, .prose ol {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+  padding-left: 1.25em;
+}
+
+.prose li {
+  margin-top: 0.1em;
+  margin-bottom: 0.1em;
+}
+
+.prose table {
+  font-size: 11px;
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+}
+
+/* streamdown table wrapper - move controls to bottom */
+[data-streamdown="table-wrapper"] > .flex.items-center.justify-end {
+  order: 2;
+  margin-top: 0.5em;
+}
+
+[data-streamdown="table-wrapper"] > .overflow-x-auto {
+  order: 1;
+}
+
+.prose th, .prose td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.25em 0.5em;
+  text-align: left;
+}
+
+.prose th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+
+.prose code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.prose pre {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.5em;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.prose hr {
+  border-color: rgba(255, 255, 255, 0.1);
+  margin: 0.5em 0;
+}
