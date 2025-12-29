@@ -1,5 +1,6 @@
 use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, StreamEvent, ToolResultContent};
 use crate::bash::BashExecutor;
+use crate::browser::{BrowserClient, SharedBrowserClient};
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
 use crate::mcp::{McpClient, McpError, SharedMcpClient};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,8 @@ pub enum AgentError {
     Computer(#[from] ComputerError),
     #[error("MCP error: {0}")]
     Mcp(#[from] McpError),
+    #[error("Browser error: {0}")]
+    Browser(#[from] anyhow::Error),
     #[error("No API key set")]
     NoApiKey,
 }
@@ -63,6 +66,7 @@ pub struct Agent {
     computer: Mutex<Option<ComputerControl>>,
     bash: Mutex<BashExecutor>,
     mcp_client: Option<SharedMcpClient>,
+    browser_client: SharedBrowserClient,
 }
 
 impl Agent {
@@ -73,11 +77,16 @@ impl Agent {
             computer: Mutex::new(None),
             bash: Mutex::new(BashExecutor::new()),
             mcp_client: None,
+            browser_client: crate::browser::create_shared_browser_client(),
         }
     }
 
     pub fn set_mcp_client(&mut self, client: SharedMcpClient) {
         self.mcp_client = Some(client);
+    }
+
+    pub fn get_browser_client(&self) -> SharedBrowserClient {
+        self.browser_client.clone()
     }
 
     pub fn set_api_key(&mut self, key: String) {
@@ -124,25 +133,25 @@ impl Agent {
 
         self.running.store(true, Ordering::SeqCst);
 
-        // get mcp tools only in browser mode
-        let mcp_tools = if mode == AgentMode::Browser {
-            if let Some(ref mcp_client) = self.mcp_client {
-                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
-                if client.is_connected() {
-                    let tools = client.get_tools_for_claude();
-                    println!("[agent] MCP tools available: {}", tools.len());
-                    tools
-                } else {
-                    println!("[agent] MCP client not connected");
-                    Vec::new()
+        // connect browser client in browser mode
+        if mode == AgentMode::Browser {
+            let mut browser_guard = self.browser_client.lock().await;
+            if browser_guard.is_none() {
+                println!("[agent] Connecting to browser...");
+                match BrowserClient::connect().await {
+                    Ok(client) => {
+                        println!("[agent] Browser connected");
+                        *browser_guard = Some(client);
+                    }
+                    Err(e) => {
+                        println!("[agent] Browser connection failed: {}", e);
+                        self.emit(&app_handle, "error", &format!("Browser connection failed: {}", e), None, None);
+                        self.running.store(false, Ordering::SeqCst);
+                        return Err(AgentError::Browser(e));
+                    }
                 }
-            } else {
-                Vec::new()
             }
-        } else {
-            println!("[agent] Computer mode - skipping MCP tools");
-            Vec::new()
-        };
+        }
 
         let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
@@ -249,7 +258,7 @@ impl Agent {
                 }
             });
 
-            let response_content = match client.send_message_streaming(messages.clone(), event_tx, &mcp_tools, mode).await {
+            let response_content = match client.send_message_streaming(messages.clone(), event_tx, mode).await {
                 Ok(content) => {
                     println!("[agent] API streaming response complete, {} blocks", content.len());
                     content
@@ -472,8 +481,49 @@ impl Agent {
                                     content: vec![ToolResultContent::Text { text: output }],
                                 });
                             }
+                        } else if is_browser_tool(name) && mode == AgentMode::Browser {
+                            // handle browser tools
+                            println!("[agent] Calling browser tool: {}", name);
+                            self.emit(
+                                &app_handle,
+                                "action",
+                                &format!("Browser: {}", name),
+                                Some(input.clone()),
+                                None,
+                            );
+                            let _ = app_handle.emit("agent:browser_tool", serde_json::json!({ "name": name }));
+
+                            let mut browser_guard = self.browser_client.lock().await;
+                            if let Some(ref mut browser) = *browser_guard {
+                                let result = execute_browser_tool(browser, name, input).await;
+                                match result {
+                                    Ok(output) => {
+                                        println!("[agent] Browser tool success: {}...", &output[..output.len().min(200)]);
+                                        self.emit(&app_handle, "browser_result", &output, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: output }],
+                                        });
+                                    }
+                                    Err(e) => {
+                                        let err_msg = format!("Browser error: {}", e);
+                                        println!("[agent] Browser tool failed: {}", err_msg);
+                                        self.emit(&app_handle, "error", &err_msg, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: err_msg }],
+                                        });
+                                    }
+                                }
+                            } else {
+                                let err_msg = "Browser not connected".to_string();
+                                tool_results.push(ContentBlock::ToolResult {
+                                    tool_use_id: id.clone(),
+                                    content: vec![ToolResultContent::Text { text: err_msg }],
+                                });
+                            }
                         } else if let Some(ref mcp_client) = self.mcp_client {
-                            // check if it's an mcp tool
+                            // check if it's an mcp tool (legacy support)
                             let is_mcp_tool = {
                                 let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
                                 client.has_tool(name)
@@ -488,7 +538,6 @@ impl Agent {
                                     Some(input.clone()),
                                     None,
                                 );
-                                // emit globally for mini
                                 let _ = app_handle.emit("agent:mcp_tool", serde_json::json!({ "name": name }));
 
                                 let arguments = input.as_object().cloned();
@@ -692,5 +741,86 @@ fn format_action(action: &ComputerAction) -> String {
             }
         }
         _ => format!("Action: {}", action.action),
+    }
+}
+
+const BROWSER_TOOLS: &[&str] = &[
+    "take_snapshot",
+    "click",
+    "hover",
+    "fill",
+    "press_key",
+    "navigate_page",
+    "wait_for",
+    "new_page",
+    "list_pages",
+    "select_page",
+];
+
+fn is_browser_tool(name: &str) -> bool {
+    BROWSER_TOOLS.contains(&name)
+}
+
+async fn execute_browser_tool(
+    browser: &mut BrowserClient,
+    name: &str,
+    input: &serde_json::Value,
+) -> anyhow::Result<String> {
+    match name {
+        "take_snapshot" => {
+            let verbose = input.get("verbose").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.take_snapshot(verbose).await
+        }
+        "click" => {
+            let uid = input.get("uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
+            let dbl_click = input.get("dblClick").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.click(uid, dbl_click).await
+        }
+        "hover" => {
+            let uid = input.get("uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
+            browser.hover(uid).await
+        }
+        "fill" => {
+            let uid = input.get("uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
+            let value = input.get("value").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("value required"))?;
+            browser.fill(uid, value).await
+        }
+        "press_key" => {
+            let key = input.get("key").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("key required"))?;
+            browser.press_key(key).await
+        }
+        "navigate_page" => {
+            let nav_type = input.get("type").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("type required"))?;
+            let url = input.get("url").and_then(|v| v.as_str());
+            let ignore_cache = input.get("ignoreCache").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.navigate_page(nav_type, url, ignore_cache).await
+        }
+        "wait_for" => {
+            let text = input.get("text").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("text required"))?;
+            let timeout = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(5000);
+            browser.wait_for(text, timeout).await
+        }
+        "new_page" => {
+            let url = input.get("url").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("url required"))?;
+            browser.new_page(url).await
+        }
+        "list_pages" => {
+            browser.list_pages().await
+        }
+        "select_page" => {
+            let page_idx = input.get("pageIdx").and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow::anyhow!("pageIdx required"))? as usize;
+            let bring_to_front = input.get("bringToFront").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.select_page(page_idx, bring_to_front).await
+        }
+        _ => Err(anyhow::anyhow!("unknown browser tool: {}", name)),
     }
 }
