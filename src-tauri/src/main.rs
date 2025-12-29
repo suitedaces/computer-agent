@@ -283,13 +283,23 @@ fn trigger_screen_flash() {
         .ok();
 }
 
+// set mini panel click-through (ignores mouse events)
+#[tauri::command]
+fn set_mini_click_through(ignore: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = MINI_PANEL.get() {
+        panel.set_ignores_mouse_events(ignore);
+    }
+    Ok(())
+}
+
 // move mini window to top-right corner (after help mode submit)
 #[tauri::command]
 fn move_mini_to_corner(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     if let Some(window) = app_handle.get_webview_window("mini") {
-        let _ = window.set_size(tauri::LogicalSize::new(300.0, 220.0));
-        position_window_top_right(&window, 300.0, 220.0);
+        let _ = window.set_size(tauri::LogicalSize::new(340.0, 300.0));
+        position_window_top_right(&window, 340.0, 300.0);
     }
     Ok(())
 }
@@ -576,6 +586,7 @@ fn main() {
             minimize_to_mini,
             capture_screen_for_help,
             move_mini_to_corner,
+            set_mini_click_through,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

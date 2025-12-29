@@ -73,7 +73,7 @@ export default function MiniWindow() {
         if (helpMode) return;
         const win = getCurrentWindow();
         if (running) {
-          win.setSize(new LogicalSize(300, 220));
+          win.setSize(new LogicalSize(340, 300));
         } else {
           // idle bar matches mini-feed width (280) but shorter height
           win.setSize(new LogicalSize(280, 36));
@@ -168,12 +168,16 @@ export default function MiniWindow() {
       setIsRunning(true);
       setFeed([]);
       setStreamingText("");
+      // make window click-through while running
+      invoke("set_mini_click_through", { ignore: true }).catch(() => {});
     });
 
     const unlisten7 = listen("agent:stopped", () => {
       console.log("[mini] stopped received");
       setIsRunning(false);
       setStreamingText("");
+      // disable click-through
+      invoke("set_mini_click_through", { ignore: false }).catch(() => {});
       // show main window when agent finishes
       invoke("show_main_window").catch(() => {});
     });
@@ -394,8 +398,12 @@ export default function MiniWindow() {
           )}
         </div>
 
-        {/* stop button */}
-        <div className="shrink-0 px-2 pb-2 pt-1 border-t border-white/5">
+        {/* stop button - disable click-through on hover */}
+        <div
+          className="shrink-0 px-2 pb-2 pt-1 border-t border-white/5"
+          onMouseEnter={() => invoke("set_mini_click_through", { ignore: false })}
+          onMouseLeave={() => invoke("set_mini_click_through", { ignore: true })}
+        >
           <button
             onClick={handleStop}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md bg-red-500/20 border border-red-400/20 text-red-300 hover:bg-red-500/30 transition-colors text-[10px]"
