@@ -4,9 +4,10 @@ Local AI agent that controls your computer. Give it natural language instruction
 
 Built with Tauri, React, and Rust.
 
-## Demo
 
-https://github.com/user-attachments/assets/fa9b195e-fae6-4dbc-adb9-dc42519624b1
+## Demo
+https://github.com/user-attachments/assets/92223003-80ae-4877-b16d-f5b4ab26ace5
+
 
 ## Disclaimers
 
