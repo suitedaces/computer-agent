@@ -158,6 +158,9 @@ impl Agent {
         // emit border show for frontend to call IPC command
         let _ = app_handle.emit("border:show", ());
 
+        // small delay to ensure spotlight window event listeners are ready
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
         // emit user message so all windows can display it
         let _ = app_handle.emit("agent-update", AgentUpdate {
             update_type: "user_message".to_string(),

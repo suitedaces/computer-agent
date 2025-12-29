@@ -57,6 +57,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 core-graphics = "0.24"
 core-foundation = "0.10"
+foreign-types = "0.5"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSScreen"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
