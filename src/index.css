@@ -287,19 +287,15 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
-/* mini feed */
-.mini-feed {
-  display: flex;
-  flex-direction: column;
-  width: 280px;
-  max-height: 200px;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+/* spotlight panel */
+.spotlight-panel {
+  background: rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(50px) saturate(180%);
+  -webkit-backdrop-filter: blur(50px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 25px 80px rgba(0, 0, 0, 0.6),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  overflow: hidden;
 }

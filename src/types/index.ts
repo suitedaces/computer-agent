@@ -1,5 +1,5 @@
 export interface AgentUpdate {
-  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result";
+  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result" | "user_message";
   message: string;
   action?: ComputerAction;
   screenshot?: string;
