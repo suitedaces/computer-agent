@@ -174,7 +174,8 @@ export default function MiniWindow() {
       console.log("[mini] stopped received");
       setIsRunning(false);
       setStreamingText("");
-      invoke("hide_mini_window").catch(() => {});
+      // show main window when agent finishes
+      invoke("show_main_window").catch(() => {});
     });
 
     // hotkey help mode - Cmd+Shift+H triggers this

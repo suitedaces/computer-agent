@@ -16,7 +16,7 @@ import {
   ChevronUp,
   Brain,
   Clock,
-  Minus,
+  X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -376,10 +376,10 @@ export default function App() {
           </select>
           <button
             onClick={() => invoke("minimize_to_mini")}
-            className="w-6 h-6 flex items-center justify-center rounded-md text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
             title="Collapse"
           >
-            <Minus size={12} />
+            <X size={16} />
           </button>
         </div>
       </div>
