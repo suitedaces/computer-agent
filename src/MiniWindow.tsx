@@ -191,13 +191,14 @@ export default function MiniWindow() {
   if (!isRunning) {
     return (
       <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.12, ease: "easeOut" }}
         onClick={handleOpenMain}
-        className="h-screen w-screen bg-black/85 backdrop-blur-xl rounded-lg border border-white/10 flex items-center gap-2 px-3 cursor-pointer hover:border-white/20 transition-colors"
+        className="h-screen w-screen mini-idle flex items-center gap-2 px-3 cursor-pointer"
       >
-        <img src="/windows-computer-icon.png" alt="" className="w-4 h-4 opacity-50" />
-        <span className="text-[12px] text-white/50 flex items-center gap-1">summon an agent <ChevronRight size={12} /></span>
+        <img src="/windows-computer-icon.png" alt="" className="w-4 h-4 opacity-60" />
+        <span className="text-[12px] text-white/60 flex items-center gap-1">summon an agent <ChevronRight size={12} /></span>
       </motion.div>
     );
   }

@@ -39,27 +39,54 @@ struct AppState {
     mcp_client: SharedMcpClient,
 }
 
+// cached screen info for fast window positioning
+#[cfg(target_os = "macos")]
+struct ScreenInfo {
+    width: f64,
+    menubar_height: f64,
+    scale: f64,
+}
+
+#[cfg(target_os = "macos")]
+static SCREEN_INFO: std::sync::OnceLock<ScreenInfo> = std::sync::OnceLock::new();
+
+// cached panel handles for instant access (avoids mutex lock on every operation)
+#[cfg(target_os = "macos")]
+static MAIN_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
+#[cfg(target_os = "macos")]
+static MINI_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "macos")]
+fn get_screen_info() -> &'static ScreenInfo {
+    SCREEN_INFO.get_or_init(|| {
+        use objc2_app_kit::NSScreen;
+        use objc2_foundation::MainThreadMarker;
+
+        if let Some(mtm) = MainThreadMarker::new() {
+            if let Some(screen) = NSScreen::mainScreen(mtm) {
+                let frame = screen.frame();
+                let visible = screen.visibleFrame();
+                let menubar_height = frame.size.height - visible.size.height - visible.origin.y;
+                let scale = unsafe { screen.backingScaleFactor() };
+                return ScreenInfo {
+                    width: frame.size.width,
+                    menubar_height,
+                    scale,
+                };
+            }
+        }
+        // fallback for retina mac
+        ScreenInfo { width: 1440.0, menubar_height: 25.0, scale: 2.0 }
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn position_window_top_right(window: &tauri::WebviewWindow, width: f64, height: f64) {
-    use objc2_app_kit::NSScreen;
-    use objc2_foundation::MainThreadMarker;
-
-    if let Some(mtm) = MainThreadMarker::new() {
-        if let Some(screen) = NSScreen::mainScreen(mtm) {
-            let frame = screen.frame();
-            let visible = screen.visibleFrame();
-            let menubar_height = frame.size.height - visible.size.height - visible.origin.y;
-            let scale = unsafe { screen.backingScaleFactor() };
-
-            let padding = 10.0;
-            // x: right edge minus window width minus padding
-            let x = (frame.size.width - width - padding) * scale;
-            // y: just below menubar (in screen coords, y=0 is top after accounting for menubar)
-            let y = (menubar_height + padding) * scale;
-
-            let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
-        }
-    }
+    let info = get_screen_info();
+    let padding = 10.0;
+    let x = (info.width - width - padding) * info.scale;
+    let y = (info.menubar_height + padding) * info.scale;
+    let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
 }
 
 #[tauri::command]
@@ -163,11 +190,12 @@ async fn get_mcp_tools(state: State<'_, AppState>) -> Result<Vec<String>, String
 #[tauri::command]
 fn show_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    if let Ok(panel) = app_handle.get_webview_panel("mini") {
-        if let Some(window) = app_handle.get_webview_window("mini") {
-            // idle size (280x36 logical)
-            let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
-            position_window_top_right(&window, 280.0, 36.0);
+    if let Some(panel) = MINI_PANEL.get() {
+        if !panel.is_visible() {
+            if let Some(window) = app_handle.get_webview_window("mini") {
+                let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
+                position_window_top_right(&window, 280.0, 36.0);
+            }
         }
         panel.show();
     }
@@ -179,13 +207,13 @@ fn show_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn hide_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+fn hide_mini_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    if let Ok(panel) = app_handle.get_webview_panel("mini") {
+    if let Some(panel) = MINI_PANEL.get() {
         panel.hide();
     }
     #[cfg(not(target_os = "macos"))]
-    if let Some(window) = app_handle.get_webview_window("mini") {
+    if let Some(window) = _app_handle.get_webview_window("mini") {
         let _ = window.hide();
     }
     Ok(())
@@ -195,12 +223,14 @@ fn hide_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
 fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(mini_panel) = app_handle.get_webview_panel("mini") {
+        if let Some(mini_panel) = MINI_PANEL.get() {
             mini_panel.hide();
         }
-        if let Ok(panel) = app_handle.get_webview_panel("main") {
-            if let Some(window) = app_handle.get_webview_window("main") {
-                position_window_top_right(&window, 420.0, 600.0);
+        if let Some(panel) = MAIN_PANEL.get() {
+            if !panel.is_visible() {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    position_window_top_right(&window, 420.0, 600.0);
+                }
             }
             panel.show_and_make_key();
         }
@@ -219,14 +249,45 @@ fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn hide_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+fn hide_main_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    if let Ok(panel) = app_handle.get_webview_panel("main") {
+    if let Some(panel) = MAIN_PANEL.get() {
         panel.hide();
     }
     #[cfg(not(target_os = "macos"))]
-    if let Some(window) = app_handle.get_webview_window("main") {
+    if let Some(window) = _app_handle.get_webview_window("main") {
         let _ = window.hide();
+    }
+    Ok(())
+}
+
+// single command to minimize main -> mini (uses cached handles, no mutex lock)
+#[tauri::command]
+fn minimize_to_mini(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // use cached panel handles - no mutex lock needed
+        if let Some(main_panel) = MAIN_PANEL.get() {
+            main_panel.hide();
+        }
+        if let Some(mini_panel) = MINI_PANEL.get() {
+            if !mini_panel.is_visible() {
+                if let Some(window) = app_handle.get_webview_window("mini") {
+                    let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
+                    position_window_top_right(&window, 280.0, 36.0);
+                }
+            }
+            mini_panel.show();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(main) = app_handle.get_webview_window("main") {
+            let _ = main.hide();
+        }
+        if let Some(mini) = app_handle.get_webview_window("mini") {
+            let _ = mini.show();
+        }
     }
     Ok(())
 }
@@ -278,7 +339,7 @@ fn main() {
             // hide from dock - menubar app only
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // convert windows to panels for fullscreen support
+            // convert windows to panels and cache handles for instant access
             #[cfg(target_os = "macos")]
             {
                 // main panel
@@ -297,10 +358,12 @@ fn main() {
                                 .into(),
                         );
                         panel.set_hides_on_deactivate(false);
+                        // cache for instant access
+                        let _ = MAIN_PANEL.set(panel);
                     }
                 }
 
-                // mini panel - same setup as main for fullscreen support
+                // mini panel
                 if let Some(window) = app.get_webview_window("mini") {
                     // ensure mini window has ?mini=true in URL (for dev mode)
                     if let Ok(url) = window.url() {
@@ -321,6 +384,8 @@ fn main() {
                                 .into(),
                         );
                         panel.set_hides_on_deactivate(false);
+                        // cache for instant access
+                        let _ = MINI_PANEL.set(panel);
                     }
                 }
             }
@@ -331,7 +396,7 @@ fn main() {
                 if let Some(window) = app.get_webview_window("mini") {
                     let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
                     position_window_top_right(&window, 280.0, 36.0);
-                    if let Ok(panel) = app.get_webview_panel("mini") {
+                    if let Some(panel) = MINI_PANEL.get() {
                         panel.show();
                     }
                 }
@@ -424,6 +489,7 @@ fn main() {
             hide_mini_window,
             show_main_window,
             hide_main_window,
+            minimize_to_mini,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
