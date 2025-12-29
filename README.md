@@ -1,4 +1,5 @@
 # Taskhomie (Computer Use AI Agent)
+![EF761F11-8205-4F8E-A1F7-4714A41F2800](https://github.com/user-attachments/assets/d1d6f552-9062-4fa9-8411-d145f934af55)
 
 Local AI agent that controls your computer. Give it natural language instructions and watch Claude take screenshots, move your mouse, click, type, and run terminal commands.
 
@@ -10,10 +11,6 @@ Built with Tauri, React, and Rust.
 https://github.com/user-attachments/assets/8edd92a7-7d3e-472a-9e48-3b561f0257d6
 
 Here, I used it to autonomously read and reply to tweets, lol. This is purely for demonstration/research, you should not attempt to do the same, lol.
-
-
-
-
 
 ## Disclaimers
 
