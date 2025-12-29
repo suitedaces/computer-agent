@@ -68,7 +68,7 @@ fn get_screen_info() -> &'static ScreenInfo {
                 let frame = screen.frame();
                 let visible = screen.visibleFrame();
                 let menubar_height = frame.size.height - visible.size.height - visible.origin.y;
-                let scale = unsafe { screen.backingScaleFactor() };
+                let scale = screen.backingScaleFactor();
                 return ScreenInfo {
                     width: frame.size.width,
                     menubar_height,
@@ -82,11 +82,20 @@ fn get_screen_info() -> &'static ScreenInfo {
 }
 
 #[cfg(target_os = "macos")]
-fn position_window_top_right(window: &tauri::WebviewWindow, width: f64, height: f64) {
+fn position_window_top_right(window: &tauri::WebviewWindow, width: f64, _height: f64) {
     let info = get_screen_info();
     let padding = 10.0;
     let x = (info.width - width - padding) * info.scale;
     let y = (info.menubar_height + padding) * info.scale;
+    let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
+}
+
+#[cfg(target_os = "macos")]
+fn position_window_center(window: &tauri::WebviewWindow, width: f64, _height: f64) {
+    let info = get_screen_info();
+    let x = ((info.width - width) / 2.0) * info.scale;
+    // center vertically in visible area (below menubar)
+    let y = ((info.menubar_height + 300.0)) * info.scale;
     let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
 }
 
@@ -274,6 +283,17 @@ fn trigger_screen_flash() {
         .ok();
 }
 
+// move mini window to top-right corner (after help mode submit)
+#[tauri::command]
+fn move_mini_to_corner(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.set_size(tauri::LogicalSize::new(300.0, 220.0));
+        position_window_top_right(&window, 300.0, 220.0);
+    }
+    Ok(())
+}
+
 // hotkey triggered - capture screenshot and return base64
 #[tauri::command]
 fn capture_screen_for_help() -> Result<String, String> {
@@ -360,12 +380,12 @@ fn main() {
                         // emit event to frontend - it will capture screenshot and show UI
                         let _ = app.emit("hotkey-help", ());
 
-                        // show mini window expanded
+                        // show mini window centered (will animate to corner after submit)
                         #[cfg(target_os = "macos")]
                         if let Some(panel) = MINI_PANEL.get() {
                             if let Some(window) = app.get_webview_window("mini") {
-                                let _ = window.set_size(tauri::LogicalSize::new(300.0, 220.0));
-                                position_window_top_right(&window, 300.0, 220.0);
+                                let _ = window.set_size(tauri::LogicalSize::new(340.0, 200.0));
+                                position_window_center(&window, 340.0, 200.0);
                             }
                             panel.show();
                         }
@@ -545,6 +565,7 @@ fn main() {
             hide_main_window,
             minimize_to_mini,
             capture_screen_for_help,
+            move_mini_to_corner,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

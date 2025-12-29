@@ -215,7 +215,10 @@ export default function MiniWindow() {
   const handleHelpSubmit = async () => {
     if (!helpPrompt.trim() || !helpScreenshot) return;
     try {
-      // run agent with screenshot context
+      // move window to corner first
+      await invoke("move_mini_to_corner");
+
+      // then run agent with screenshot context
       await invoke("run_agent", {
         instructions: helpPrompt,
         model: "claude-sonnet-4-5",
@@ -239,54 +242,55 @@ export default function MiniWindow() {
     await win.setSize(new LogicalSize(280, 36));
   };
 
-  // help mode UI - shows when hotkey triggered
+  // help mode UI - centered screenshot capture
   if (helpMode && !isRunning) {
     return (
-      <div className="h-screen w-screen flex items-start justify-start p-2">
+      <div className="h-screen w-screen flex items-center justify-center p-3">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="mini-feed"
+          transition={{ type: "spring", damping: 20, stiffness: 300 }}
+          className="w-full bg-black/80 backdrop-blur-xl rounded-xl border border-white/10 shadow-2xl overflow-hidden"
         >
           {/* screenshot preview */}
           {helpScreenshot && (
-            <div className="px-2 pt-2">
+            <div className="p-3 pb-0">
               <img
                 src={`data:image/jpeg;base64,${helpScreenshot}`}
                 alt="Screenshot"
-                className="w-full h-20 object-cover rounded-md border border-white/10"
+                className="w-full h-24 object-cover rounded-lg border border-white/10"
               />
             </div>
           )}
 
           {/* prompt input */}
-          <div className="flex-1 px-2 py-2">
+          <div className="p-3">
             <input
               ref={inputRef}
               type="text"
               value={helpPrompt}
               onChange={(e) => setHelpPrompt(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleHelpSubmit()}
-              placeholder="Help me out here..."
-              className="w-full bg-white/5 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-white/90 placeholder:text-white/30 focus:outline-none focus:border-white/20"
+              placeholder="What do you need help with?"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[12px] text-white/90 placeholder:text-white/30 focus:outline-none focus:border-white/25 focus:bg-white/10 transition-all"
               autoFocus
             />
           </div>
 
           {/* action buttons */}
-          <div className="shrink-0 px-2 pb-2 flex gap-2">
+          <div className="px-3 pb-3 flex gap-2">
             <button
               onClick={handleHelpCancel}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 transition-colors text-[10px]"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-[11px]"
             >
-              <X size={10} />
+              <X size={12} />
               <span>Cancel</span>
             </button>
             <button
               onClick={handleHelpSubmit}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md bg-blue-500/20 border border-blue-400/20 text-blue-300 hover:bg-blue-500/30 transition-colors text-[10px]"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-500/30 border border-blue-400/30 text-blue-200 hover:bg-blue-500/40 transition-all text-[11px] font-medium"
             >
-              <Send size={10} />
+              <Send size={12} />
               <span>Send</span>
             </button>
           </div>
