@@ -49,7 +49,6 @@ export function useAgent() {
           break;
 
         case "user_message":
-          // user message from backend (for cross-window sync)
           addMessage({ role: "user", content: message, screenshot });
           break;
 
@@ -145,7 +144,7 @@ export function useAgent() {
     if (!overrideText) setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, context_screenshot: contextScreenshot ?? null });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: contextScreenshot ?? null });
     } catch (error) {
       // on early failure, show the user message so they know what failed
       addMessage({ role: "user", content: text });

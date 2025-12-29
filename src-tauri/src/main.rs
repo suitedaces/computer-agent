@@ -122,7 +122,7 @@ async fn check_api_key(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(agent.has_api_key())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn run_agent(
     instructions: String,
     model: String,
@@ -474,6 +474,8 @@ fn main() {
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyS))
                 .unwrap()
+                .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyQ))
+                .unwrap()
                 .with_handler(move |app, shortcut, event| {
                     if event.state != ShortcutState::Pressed {
                         return;
@@ -515,6 +517,12 @@ fn main() {
                             running_for_shortcut.store(false, std::sync::atomic::Ordering::SeqCst);
                             println!("[taskhomie] Stop requested via shortcut");
                         }
+                    }
+
+                    // Cmd+Shift+Q - quit app
+                    if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyQ) {
+                        println!("[taskhomie] Quit requested via shortcut");
+                        app.exit(0);
                     }
                 })
                 .build(),

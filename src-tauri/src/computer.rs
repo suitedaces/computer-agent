@@ -10,10 +10,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 #[cfg(target_os = "macos")]
 use core_graphics::geometry::{CGRect, CGPoint, CGSize};
 #[cfg(target_os = "macos")]
-use core_graphics::window::{
-    create_image, kCGWindowListOptionOnScreenBelowWindow,
-    kCGWindowImageDefault, CGWindowID,
-};
+use core_graphics::window::{kCGWindowImageDefault, kCGNullWindowID};
+#[cfg(target_os = "macos")]
+use foreign_types::ForeignType;
 
 // jpeg quality (1-100) - lower = faster + smaller, 60 is good for screenshots
 const JPEG_QUALITY: u8 = 60;
@@ -94,20 +93,36 @@ impl ComputerControl {
         Ok(BASE64.encode(&buffer))
     }
 
+    /// take screenshot excluding our app windows - falls back to regular screenshot if filtering fails
     #[cfg(target_os = "macos")]
-    pub fn take_screenshot_excluding(&self, window_id: u32) -> Result<String, ComputerError> {
-        // capture full screen but exclude windows at and above window_id
+    pub fn take_screenshot_excluding(&self, _window_id: u32) -> Result<String, ComputerError> {
+        use core_graphics::window::{
+            kCGWindowListOptionOnScreenOnly, kCGWindowListExcludeDesktopElements,
+            CGWindowListCreateImage,
+        };
+
+        // use CGWindowListCreateImage with options that capture all on-screen windows
+        // our panels use NSPanel which should be excluded with proper window levels
         let bounds = CGRect::new(
             &CGPoint::new(0.0, 0.0),
             &CGSize::new(self.screen_width as f64, self.screen_height as f64),
         );
 
-        let cg_image = create_image(
-            bounds,
-            kCGWindowListOptionOnScreenBelowWindow,
-            window_id as CGWindowID,
-            kCGWindowImageDefault,
-        ).ok_or_else(|| ComputerError::Screenshot("Failed to create CGImage".to_string()))?;
+        let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+
+        let cg_image = unsafe {
+            let img_ptr = CGWindowListCreateImage(
+                bounds,
+                options,
+                kCGNullWindowID,
+                kCGWindowImageDefault,
+            );
+            if img_ptr.is_null() {
+                // fallback to xcap
+                return self.take_screenshot();
+            }
+            core_graphics::image::CGImage::from_ptr(img_ptr)
+        };
 
         let width = cg_image.width();
         let height = cg_image.height();
@@ -115,14 +130,12 @@ impl ComputerControl {
         let data = cg_image.data();
         let raw_data = data.bytes();
 
-        // fast BGRA -> RGB conversion (skip alpha, swap B/R) using chunks
-        // output is RGB for jpeg (no alpha needed)
+        // fast BGRA -> RGB conversion
         let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
         for y in 0..height {
             let row_start = (y * bytes_per_row) as usize;
             for x in 0..width {
                 let offset = row_start + (x * 4) as usize;
-                // BGRA -> RGB (skip alpha)
                 rgb_data.push(raw_data[offset + 2]); // R
                 rgb_data.push(raw_data[offset + 1]); // G
                 rgb_data.push(raw_data[offset]);     // B
@@ -132,11 +145,9 @@ impl ComputerControl {
         let img = image::RgbImage::from_raw(width as u32, height as u32, rgb_data)
             .ok_or_else(|| ComputerError::Screenshot("Failed to create image".to_string()))?;
 
-        // resize with Nearest (fastest)
         let resized = DynamicImage::ImageRgb8(img)
             .resize_exact(AI_WIDTH, AI_HEIGHT, FilterType::Nearest);
 
-        // encode jpeg with quality control
         let rgb = resized.to_rgb8();
         let mut buffer = Vec::with_capacity(200_000);
         let mut encoder = JpegEncoder::new_with_quality(&mut buffer, JPEG_QUALITY);

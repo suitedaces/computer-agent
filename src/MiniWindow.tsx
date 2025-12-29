@@ -5,8 +5,10 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { motion } from "framer-motion";
 import { ChevronRight, Send, X } from "lucide-react";
 import ChatView from "./components/ChatView";
+import { useAgent } from "./hooks/useAgent";
 
 export default function MiniWindow() {
+  const { submit } = useAgent();
   const [isRunning, setIsRunning] = useState(false);
   const [helpMode, setHelpMode] = useState(false);
   const [helpPrompt, setHelpPrompt] = useState("");
@@ -69,19 +71,23 @@ export default function MiniWindow() {
 
   const handleHelpSubmit = async () => {
     if (!helpPrompt.trim() || !helpScreenshot) return;
+
+    // capture values before any state changes
+    const prompt = helpPrompt;
+    const screenshot = helpScreenshot;
+
     try {
-      await invoke("hide_mini_window");
+      // show spotlight first
       await invoke("show_spotlight_window");
+      await new Promise((r) => setTimeout(r, 150));
 
-      await invoke("run_agent", {
-        instructions: helpPrompt,
-        model: "claude-sonnet-4-5",
-        mode: "computer",
-        history: [],
-        context_screenshot: helpScreenshot,
-      });
+      // use the shared useAgent submit which goes through the hook
+      await submit(prompt, screenshot ?? undefined);
 
+      // now hide mini and clear state
       setHelpMode(false);
+      await invoke("hide_mini_window");
+
       setHelpScreenshot(null);
       setHelpPrompt("");
     } catch (e) {
