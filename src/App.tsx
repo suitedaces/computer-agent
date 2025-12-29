@@ -325,7 +325,12 @@ export default function App() {
   const canSubmit = inputText.trim().length > 0 || isRunning;
 
   return (
-    <div className="h-screen flex flex-col bg-black/85 backdrop-blur-2xl overflow-hidden rounded-xl">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.12, ease: "easeOut" }}
+      className="h-screen flex flex-col app-panel overflow-hidden"
+    >
       {/* titlebar */}
       <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
         <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">
@@ -370,7 +375,7 @@ export default function App() {
             ))}
           </select>
           <button
-            onClick={() => invoke("show_mini_window").then(() => invoke("hide_main_window"))}
+            onClick={() => invoke("minimize_to_mini")}
             className="w-6 h-6 flex items-center justify-center rounded-md text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
             title="Collapse"
           >
@@ -439,6 +444,6 @@ export default function App() {
           </motion.button>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
