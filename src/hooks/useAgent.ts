@@ -42,6 +42,7 @@ export function useAgent() {
           invoke("set_main_click_through", { ignore: true }).catch(() => {});
           invoke("set_mini_click_through", { ignore: true }).catch(() => {});
           invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
+          invoke("show_border_overlay").catch(() => {});
           break;
 
         case "user_message":
@@ -87,6 +88,7 @@ export function useAgent() {
           invoke("set_main_click_through", { ignore: false }).catch(() => {});
           invoke("set_mini_click_through", { ignore: false }).catch(() => {});
           invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
+          invoke("hide_border_overlay").catch(() => {});
           break;
 
         case "error":
@@ -95,6 +97,7 @@ export function useAgent() {
           invoke("set_main_click_through", { ignore: false }).catch(() => {});
           invoke("set_mini_click_through", { ignore: false }).catch(() => {});
           invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
+          invoke("hide_border_overlay").catch(() => {});
           addMessage({ role: "assistant", content: message, type: "error" });
           break;
 
@@ -152,6 +155,7 @@ export function useAgent() {
     try {
       await invoke("stop_agent");
       setIsRunning(false);
+      invoke("hide_border_overlay").catch(() => {});
       addMessage({ role: "assistant", content: "Interrupted", type: "error" });
     } catch (e) {
       console.error(e);

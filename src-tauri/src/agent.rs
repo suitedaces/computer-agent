@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
+
 #[derive(Error, Debug)]
 pub enum AgentError {
     #[error("API error: {0}")]
@@ -147,6 +148,9 @@ impl Agent {
         // emit started to all windows
         self.emit(&app_handle, "started", "Agent started", None, None);
         let _ = app_handle.emit("agent:started", ());
+
+        // emit border show for frontend to call IPC command
+        let _ = app_handle.emit("border:show", ());
 
         // emit user message so all windows can display it
         let _ = app_handle.emit("agent-update", AgentUpdate {
@@ -528,6 +532,10 @@ impl Agent {
 
         self.running.store(false, Ordering::SeqCst);
         let _ = app_handle.emit("agent:stopped", ());
+
+        // emit border hide for frontend to call IPC command
+        let _ = app_handle.emit("border:hide", ());
+
         Ok(())
     }
 
