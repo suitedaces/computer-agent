@@ -109,10 +109,12 @@ async fn run_agent(
     model: String,
     mode: AgentMode,
     history: Vec<HistoryMessage>,
+    context_screenshot: Option<String>,
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs)", instructions, model, mode, history.len());
+    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {})",
+        instructions, model, mode, history.len(), context_screenshot.is_some());
 
     let agent = state.agent.clone();
 
@@ -128,7 +130,7 @@ async fn run_agent(
 
     tokio::spawn(async move {
         let agent_guard = agent.lock().await;
-        match agent_guard.run(instructions, model, mode, history, app_handle).await {
+        match agent_guard.run(instructions, model, mode, history, context_screenshot, app_handle).await {
             Ok(_) => println!("[taskhomie] Agent finished"),
             Err(e) => println!("[taskhomie] Agent error: {:?}", e),
         }
@@ -262,12 +264,28 @@ fn hide_main_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// single command to minimize main -> mini (uses cached handles, no mutex lock)
+// trigger screen flash effect - plays sound as feedback
+#[cfg(target_os = "macos")]
+fn trigger_screen_flash() {
+    // play screenshot sound in background
+    std::process::Command::new("afplay")
+        .arg("/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Grab.aif")
+        .spawn()
+        .ok();
+}
+
 // hotkey triggered - capture screenshot and return base64
 #[tauri::command]
 fn capture_screen_for_help() -> Result<String, String> {
+    // capture first (fast)
     let control = computer::ComputerControl::new().map_err(|e| e.to_string())?;
-    control.take_screenshot().map_err(|e| e.to_string())
+    let screenshot = control.take_screenshot().map_err(|e| e.to_string())?;
+
+    // then play sound as feedback
+    #[cfg(target_os = "macos")]
+    trigger_screen_flash();
+
+    Ok(screenshot)
 }
 
 #[tauri::command]

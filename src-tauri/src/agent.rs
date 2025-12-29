@@ -95,9 +95,11 @@ impl Agent {
         model: String,
         mode: AgentMode,
         history: Vec<HistoryMessage>,
+        context_screenshot: Option<String>,
         app_handle: AppHandle,
     ) -> Result<(), AgentError> {
-        println!("[agent] run() starting with: {} (model: {}, mode: {:?}, history: {} msgs)", instructions, model, mode, history.len());
+        println!("[agent] run() starting with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {})",
+            instructions, model, mode, history.len(), context_screenshot.is_some());
 
         let api_key = self.api_key.clone().ok_or(AgentError::NoApiKey)?;
         println!("[agent] API key present");
@@ -158,12 +160,28 @@ impl Agent {
             });
         }
 
-        // add current user instructions
+        // build user message content - include screenshot if provided
+        let mut user_content: Vec<ContentBlock> = Vec::new();
+
+        // add context screenshot first if provided (from hotkey help mode)
+        if let Some(screenshot_data) = context_screenshot {
+            user_content.push(ContentBlock::Image {
+                source: ImageSource {
+                    source_type: "base64".to_string(),
+                    media_type: "image/jpeg".to_string(),
+                    data: screenshot_data,
+                },
+            });
+        }
+
+        // add text instructions
+        user_content.push(ContentBlock::Text {
+            text: instructions.clone(),
+        });
+
         messages.push(Message {
             role: "user".to_string(),
-            content: vec![ContentBlock::Text {
-                text: instructions.clone(),
-            }],
+            content: user_content,
         });
 
         // agent loop - limit iterations to prevent runaway tasks.

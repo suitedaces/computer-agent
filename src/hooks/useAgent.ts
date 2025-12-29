@@ -123,7 +123,7 @@ export function useAgent() {
     setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: null });
     } catch (error) {
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);

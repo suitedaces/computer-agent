@@ -69,6 +69,8 @@ export default function MiniWindow() {
     const checkRunning = () => {
       invoke<boolean>("is_agent_running").then((running) => {
         setIsRunning(running);
+        // don't resize if in help mode
+        if (helpMode) return;
         const win = getCurrentWindow();
         if (running) {
           win.setSize(new LogicalSize(300, 220));
@@ -81,7 +83,7 @@ export default function MiniWindow() {
     checkRunning();
     const interval = setInterval(checkRunning, 500);
     return () => clearInterval(interval);
-  }, []);
+  }, [helpMode]);
 
   const handleStop = async () => {
     try {
@@ -218,13 +220,8 @@ export default function MiniWindow() {
         instructions: helpPrompt,
         model: "claude-sonnet-4-5",
         mode: "computer",
-        history: [{
-          role: "user",
-          content: [
-            { type: "text", text: helpPrompt },
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: helpScreenshot } }
-          ]
-        }]
+        history: [],
+        contextScreenshot: helpScreenshot,
       });
       setHelpMode(false);
       setHelpScreenshot(null);
@@ -233,11 +230,13 @@ export default function MiniWindow() {
     }
   };
 
-  const handleHelpCancel = () => {
+  const handleHelpCancel = async () => {
     setHelpMode(false);
     setHelpScreenshot(null);
     setHelpPrompt("Help me out here: ");
-    invoke("hide_mini_window").catch(() => {});
+    // resize back to idle
+    const win = getCurrentWindow();
+    await win.setSize(new LogicalSize(280, 36));
   };
 
   // help mode UI - shows when hotkey triggered
