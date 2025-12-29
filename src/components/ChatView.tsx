@@ -308,6 +308,7 @@ export default function ChatView({ variant }: ChatViewProps) {
   const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking } = useAgentStore();
   const { submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const isSpotlight = variant === "spotlight";
@@ -317,14 +318,28 @@ export default function ChatView({ variant }: ChatViewProps) {
   const emptyPadding = isSpotlight ? "pt-32" : "pt-24";
   const gifSize = isSpotlight ? "w-[32rem]" : "w-[28rem]";
 
-  // auto-scroll on messages, streaming text, or thinking
+  // auto-scroll on new messages
   useEffect(() => {
-    requestAnimationFrame(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // auto-scroll during streaming (throttled)
+  useEffect(() => {
+    if (!streamingText && !streamingThinking) return;
+    const frame = requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
     });
-  }, [messages, streamingText, streamingThinking]);
+    return () => cancelAnimationFrame(frame);
+  }, [streamingText, streamingThinking]);
+
+  // auto-scroll when agent finishes
+  useEffect(() => {
+    if (!isRunning) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [isRunning]);
 
   // focus input on mount
   useEffect(() => {
@@ -441,6 +456,7 @@ export default function ChatView({ variant }: ChatViewProps) {
                 {messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)}
                 <ThinkingBubble />
                 <StreamingBubble />
+                <div ref={bottomRef} />
               </>
             )}
           </AnimatePresence>
