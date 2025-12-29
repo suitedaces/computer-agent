@@ -316,7 +316,6 @@ export default function ChatView({ variant }: ChatViewProps) {
   const panelClass = isMini ? "mini-panel" : isSpotlight ? "spotlight-panel" : "app-panel";
   const padding = isMini ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
   const inputPadding = isMini ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
-  const emptyPadding = isMini ? "pt-8" : isSpotlight ? "pt-32" : "pt-24";
   const gifSize = isMini ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
 
   // auto-scroll on new messages
@@ -443,13 +442,13 @@ export default function ChatView({ variant }: ChatViewProps) {
 
       {/* messages */}
       <div ref={scrollRef} className={`flex-1 overflow-y-auto ${padding}`}>
-        <div className="space-y-2">
+        <div className={messages.length === 0 && !streamingText && !streamingThinking ? "h-full" : "space-y-2"}>
           <AnimatePresence mode="popLayout">
             {messages.length === 0 && !streamingText && !streamingThinking ? (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className={`flex flex-col items-center justify-center h-full ${emptyPadding} text-white/25`}
+                className="flex flex-col items-center justify-center h-full text-white/25"
               >
                 <img src="/vaporlofi.gif" alt="" className={`${gifSize} h-auto opacity-60`} />
                 <p className="text-sm mt-4 text-white/50">sip coffee while ai takes over your computer</p>

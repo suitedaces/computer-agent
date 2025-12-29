@@ -295,6 +295,14 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+/* hide scrollbar in spotlight */
+.spotlight-panel ::-webkit-scrollbar {
+  display: none;
+}
+.spotlight-panel {
+  scrollbar-width: none;
+}
+
 /* agent active edge glow overlay */
 .edge-glow {
   position: absolute;
