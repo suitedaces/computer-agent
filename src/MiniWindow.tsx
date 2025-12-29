@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { motion } from "framer-motion";
 import { ChevronRight, Send, X } from "lucide-react";
+import ChatView from "./components/ChatView";
 
 export default function MiniWindow() {
   const [isRunning, setIsRunning] = useState(false);
@@ -12,15 +13,18 @@ export default function MiniWindow() {
   const [helpScreenshot, setHelpScreenshot] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // poll running state
+  // poll running state and resize window
   useEffect(() => {
     const checkRunning = () => {
       invoke<boolean>("is_agent_running").then((running) => {
         setIsRunning(running);
-        // keep mini window at idle size when not in help mode
+        const win = getCurrentWindow();
         if (!helpMode && !running) {
-          const win = getCurrentWindow();
+          // idle bar size
           win.setSize(new LogicalSize(280, 36));
+        } else if (running && !helpMode) {
+          // running feed size
+          win.setSize(new LogicalSize(380, 320));
         }
       }).catch(() => {});
     };
@@ -32,7 +36,6 @@ export default function MiniWindow() {
   useEffect(() => {
     const unlisten1 = listen("agent:started", () => {
       setIsRunning(true);
-      // mini window handles its own visibility - don't interfere with spotlight
     });
 
     const unlisten2 = listen("agent:stopped", () => {
@@ -182,7 +185,7 @@ export default function MiniWindow() {
     );
   }
 
-  // idle bar (mini window is hidden when running, main window shows instead)
+  // idle bar
   if (!isRunning) {
     return (
       <motion.div
@@ -198,6 +201,6 @@ export default function MiniWindow() {
     );
   }
 
-  // when running, mini window is hidden (main window is shown instead)
-  return <div className="h-screen w-screen" />;
+  // running - show mini ChatView
+  return <ChatView variant="mini" />;
 }

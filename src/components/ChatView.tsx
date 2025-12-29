@@ -23,7 +23,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 
 interface ChatViewProps {
-  variant: "sidebar" | "spotlight";
+  variant: "sidebar" | "spotlight" | "mini";
 }
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
@@ -312,11 +312,12 @@ export default function ChatView({ variant }: ChatViewProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const isSpotlight = variant === "spotlight";
-  const panelClass = isSpotlight ? "spotlight-panel" : "app-panel";
-  const padding = isSpotlight ? "px-4 py-4" : "px-3 py-3";
-  const inputPadding = isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
-  const emptyPadding = isSpotlight ? "pt-32" : "pt-24";
-  const gifSize = isSpotlight ? "w-[32rem]" : "w-[28rem]";
+  const isMini = variant === "mini";
+  const panelClass = isMini ? "mini-panel" : isSpotlight ? "spotlight-panel" : "app-panel";
+  const padding = isMini ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
+  const inputPadding = isMini ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
+  const emptyPadding = isMini ? "pt-8" : isSpotlight ? "pt-32" : "pt-24";
+  const gifSize = isMini ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
 
   // auto-scroll on new messages
   useEffect(() => {
@@ -375,68 +376,70 @@ export default function ChatView({ variant }: ChatViewProps) {
       transition={{ duration: 0.12, ease: "easeOut" }}
       className={`h-screen flex flex-col ${panelClass} overflow-hidden`}
     >
-      {/* titlebar */}
-      <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
-        <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">
-          taskhomie
-        </span>
-        <div className="flex items-center gap-2">
-          {/* mode toggle */}
-          <div className="flex rounded-md overflow-hidden border border-white/10">
-            <button
-              onClick={() => setSelectedMode("computer")}
+      {/* titlebar - hidden for mini */}
+      {!isMini && (
+        <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
+          <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">
+            taskhomie
+          </span>
+          <div className="flex items-center gap-2">
+            {/* mode toggle */}
+            <div className="flex rounded-md overflow-hidden border border-white/10">
+              <button
+                onClick={() => setSelectedMode("computer")}
+                disabled={isRunning}
+                className={`px-2 py-1 text-[10px] transition-colors ${
+                  selectedMode === "computer"
+                    ? "bg-white/15 text-white/90"
+                    : "text-white/40 hover:text-white/60"
+                } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                computer
+              </button>
+              <button
+                onClick={() => setSelectedMode("browser")}
+                disabled={isRunning}
+                className={`px-2 py-1 text-[10px] transition-colors ${
+                  selectedMode === "browser"
+                    ? "bg-white/15 text-white/90"
+                    : "text-white/40 hover:text-white/60"
+                } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                browser
+              </button>
+            </div>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value as ModelId)}
               disabled={isRunning}
-              className={`px-2 py-1 text-[10px] transition-colors ${
-                selectedMode === "computer"
-                  ? "bg-white/15 text-white/90"
-                  : "text-white/40 hover:text-white/60"
-              } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+              className="glass-select"
             >
-              computer
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleToggleView}
+              className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+              title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
+            >
+              {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
             <button
-              onClick={() => setSelectedMode("browser")}
-              disabled={isRunning}
-              className={`px-2 py-1 text-[10px] transition-colors ${
-                selectedMode === "browser"
-                  ? "bg-white/15 text-white/90"
-                  : "text-white/40 hover:text-white/60"
-              } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              browser
-            </button>
-          </div>
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value as ModelId)}
-            disabled={isRunning}
-            className="glass-select"
-          >
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={handleToggleView}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
-            title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
-          >
-            {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
-          <button
-            onClick={() => {
-              if (isSpotlight) invoke("hide_spotlight_window");
-              invoke("minimize_to_mini");
-            }}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              onClick={() => {
+                if (isSpotlight) invoke("hide_spotlight_window");
+                invoke("minimize_to_mini");
+              }}
+              className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
             title="Collapse"
           >
             <X size={16} />
-          </button>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* messages */}
       <div ref={scrollRef} className={`flex-1 overflow-y-auto ${padding}`}>

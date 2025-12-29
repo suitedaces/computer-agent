@@ -15,7 +15,11 @@ use agent::{Agent, AgentMode, HistoryMessage};
 use mcp::{create_shared_client, SharedMcpClient};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{tray::TrayIconBuilder, Emitter, Manager, PhysicalPosition, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Emitter, Manager, PhysicalPosition, State,
+};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 #[cfg(target_os = "macos")]
@@ -44,6 +48,7 @@ struct AppState {
 #[cfg(target_os = "macos")]
 struct ScreenInfo {
     width: f64,
+    height: f64,
     menubar_height: f64,
     scale: f64,
 }
@@ -58,6 +63,8 @@ static MAIN_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> =
 static MINI_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
 #[cfg(target_os = "macos")]
 static SPOTLIGHT_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
+#[cfg(target_os = "macos")]
+static BORDER_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
 
 #[cfg(target_os = "macos")]
 fn get_screen_info() -> &'static ScreenInfo {
@@ -73,13 +80,14 @@ fn get_screen_info() -> &'static ScreenInfo {
                 let scale = screen.backingScaleFactor();
                 return ScreenInfo {
                     width: frame.size.width,
+                    height: frame.size.height,
                     menubar_height,
                     scale,
                 };
             }
         }
         // fallback for retina mac
-        ScreenInfo { width: 1440.0, menubar_height: 25.0, scale: 2.0 }
+        ScreenInfo { width: 1440.0, height: 900.0, menubar_height: 25.0, scale: 2.0 }
     })
 }
 
@@ -347,6 +355,32 @@ fn set_main_click_through(ignore: bool) -> Result<(), String> {
     Ok(())
 }
 
+// set spotlight panel click-through (ignores mouse events)
+#[tauri::command]
+fn set_spotlight_click_through(ignore: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = SPOTLIGHT_PANEL.get() {
+        panel.set_ignores_mouse_events(ignore);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn show_border_overlay() {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = BORDER_PANEL.get() {
+        panel.show();
+    }
+}
+
+#[tauri::command]
+fn hide_border_overlay() {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = BORDER_PANEL.get() {
+        panel.hide();
+    }
+}
+
 // move mini window to top-right corner (after help mode submit)
 #[tauri::command]
 fn move_mini_to_corner(app_handle: tauri::AppHandle) -> Result<(), String> {
@@ -579,6 +613,40 @@ fn main() {
                         let _ = SPOTLIGHT_PANEL.set(panel);
                     }
                 }
+
+                // border panel - fullscreen overlay for agent active state
+                if let Some(window) = app.get_webview_window("border") {
+                    // ensure border window has ?border=true in URL
+                    if let Ok(url) = window.url() {
+                        if !url.to_string().contains("border") {
+                            let new_url = format!("{}?border=true", url);
+                            let _ = window.eval(&format!("window.location.href = '{}'", new_url));
+                        }
+                    }
+
+                    // set to fullscreen size
+                    let info = get_screen_info();
+                    let _ = window.set_size(tauri::LogicalSize::new(info.width, info.height));
+                    let _ = window.set_position(PhysicalPosition::new(0, 0));
+                    println!("[taskhomie] Border panel sized to {}x{}", info.width, info.height);
+
+                    if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
+                        panel.set_level(PanelLevel::Floating.value());
+                        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                        panel.set_collection_behavior(
+                            CollectionBehavior::new()
+                                .full_screen_auxiliary()
+                                .can_join_all_spaces()
+                                .stationary()
+                                .into(),
+                        );
+                        panel.set_hides_on_deactivate(false);
+                        // always click-through - only renders visual border
+                        panel.set_ignores_mouse_events(true);
+                        // cache for instant access
+                        let _ = BORDER_PANEL.set(panel);
+                    }
+                }
             }
 
             // show mini at top right after setup (idle size: 280x36 logical)
@@ -593,9 +661,21 @@ fn main() {
                 }
             }
 
+
+            // tray menu with quit option
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&quit])?;
+
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(false)
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    if event.id.as_ref() == "quit" {
+                        app.exit(0);
+                    }
+                })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Left,
@@ -687,6 +767,9 @@ fn main() {
             move_mini_to_corner,
             set_mini_click_through,
             set_main_click_through,
+            set_spotlight_click_through,
+            show_border_overlay,
+            hide_border_overlay,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

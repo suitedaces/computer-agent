@@ -5,6 +5,7 @@ export interface AgentUpdate {
   screenshot?: string;
   bash_command?: string;
   exit_code?: number;
+  mode?: "computer" | "browser";
 }
 
 export interface ComputerAction {

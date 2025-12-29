@@ -49,6 +49,19 @@
         "visible": false,
         "skipTaskbar": true,
         "alwaysOnTop": true
+      },
+      {
+        "label": "border",
+        "title": "taskhomie-border",
+        "url": "index.html?border=true",
+        "width": 1920,
+        "height": 1080,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true
       }
     ],
     "macOSPrivateApi": true,
