@@ -13,7 +13,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 #[cfg(target_os = "macos")]
 use core_graphics::geometry::{CGRect, CGPoint, CGSize};
 #[cfg(target_os = "macos")]
-use core_graphics::window::{kCGWindowImageDefault, kCGNullWindowID};
+use core_graphics::window::kCGWindowImageDefault;
 #[cfg(target_os = "macos")]
 use foreign_types::ForeignType;
 
@@ -98,26 +98,25 @@ impl ComputerControl {
 
     /// take screenshot excluding our app windows - falls back to regular screenshot if filtering fails
     #[cfg(target_os = "macos")]
-    pub fn take_screenshot_excluding(&self, _window_id: u32) -> Result<String, ComputerError> {
+    pub fn take_screenshot_excluding(&self, window_id: u32) -> Result<String, ComputerError> {
         use core_graphics::window::{
-            kCGWindowListOptionOnScreenOnly, kCGWindowListExcludeDesktopElements,
+            kCGWindowListOptionOnScreenBelowWindow, kCGWindowListExcludeDesktopElements,
             CGWindowListCreateImage,
         };
 
-        // use CGWindowListCreateImage with options that capture all on-screen windows
-        // our panels use NSPanel which should be excluded with proper window levels
+        // capture all windows BELOW our window (excludes our app)
         let bounds = CGRect::new(
             &CGPoint::new(0.0, 0.0),
             &CGSize::new(self.screen_width as f64, self.screen_height as f64),
         );
 
-        let options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements;
+        let options = kCGWindowListOptionOnScreenBelowWindow | kCGWindowListExcludeDesktopElements;
 
         let cg_image = unsafe {
             let img_ptr = CGWindowListCreateImage(
                 bounds,
                 options,
-                kCGNullWindowID,
+                window_id,
                 kCGWindowImageDefault,
             );
             if img_ptr.is_null() {

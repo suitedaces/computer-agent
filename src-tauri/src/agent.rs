@@ -329,19 +329,24 @@ impl Agent {
                                 Err(e) => println!("[agent] agent:action emit FAILED: {:?}", e),
                             }
 
-                            // get window id for native screenshot exclusion
+                            // get topmost visible panel window id for screenshot exclusion
                             #[cfg(target_os = "macos")]
                             let window_id: Option<u32> = {
                                 use tauri_nspanel::ManagerExt;
-                                app_handle.get_webview_panel("main").ok().map(|panel| {
-                                    let ns_panel = panel.as_panel();
-                                    // SAFETY: NSPanel inherits from NSWindow, windowNumber is a valid
-                                    // selector that returns the window's unique identifier as NSInteger.
-                                    // The cast to u32 is safe because window numbers are non-negative.
-                                    unsafe {
-                                        let num: isize = objc2::msg_send![ns_panel, windowNumber];
-                                        num as u32
-                                    }
+                                // check spotlight first (topmost when visible), then main
+                                let panels = ["spotlight", "main", "mini"];
+                                panels.iter().find_map(|name| {
+                                    app_handle.get_webview_panel(name).ok().and_then(|panel| {
+                                        if panel.is_visible() {
+                                            let ns_panel = panel.as_panel();
+                                            Some(unsafe {
+                                                let num: isize = objc2::msg_send![ns_panel, windowNumber];
+                                                num as u32
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    })
                                 })
                             };
                             #[cfg(not(target_os = "macos"))]
