@@ -370,7 +370,7 @@ export default function App() {
             ))}
           </select>
           <button
-            onClick={() => invoke("show_mini_window").then(() => invoke("hide_main_window"))}
+            onClick={() => { invoke("show_mini_window"); invoke("hide_main_window"); }}
             className="w-6 h-6 flex items-center justify-center rounded-md text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
             title="Collapse"
           >

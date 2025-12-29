@@ -12,6 +12,7 @@ import {
   Globe,
   Clock,
   Square,
+  ChevronRight,
 } from "lucide-react";
 
 interface FeedItem {
@@ -195,8 +196,8 @@ export default function MiniWindow() {
         onClick={handleOpenMain}
         className="h-screen w-screen bg-black/85 backdrop-blur-xl rounded-lg border border-white/10 flex items-center gap-2 px-3 cursor-pointer hover:border-white/20 transition-colors"
       >
-        <span className="w-2 h-2 rounded-full bg-white/30" />
-        <span className="text-[10px] text-white/40">idle</span>
+        <img src="/windows-computer-icon.png" alt="" className="w-4 h-4 opacity-50" />
+        <span className="text-[12px] text-white/50 flex items-center gap-1">summon an agent <ChevronRight size={12} /></span>
       </motion.div>
     );
   }
