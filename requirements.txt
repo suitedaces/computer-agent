@@ -10,3 +10,4 @@ SpeechRecognition
 pyttsx3
 keyboard
 pyaudio
+google-genai
