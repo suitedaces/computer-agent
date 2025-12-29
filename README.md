@@ -1,5 +1,6 @@
 # Taskhomie (Computer Use AI Agent)
-![EF761F11-8205-4F8E-A1F7-4714A41F2800](https://github.com/user-attachments/assets/d1d6f552-9062-4fa9-8411-d145f934af55)
+<img width="846" height="606" alt="Screenshot 2025-12-29 at 2 06 38 AM" src="https://github.com/user-attachments/assets/b5b7de82-ec58-424f-af68-e9287a6422d6" />
+
 
 Local AI agent that controls your computer. Give it natural language instructions and watch Claude take screenshots, move your mouse, click, type, and run terminal commands.
 
