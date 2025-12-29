@@ -347,6 +347,16 @@ fn set_main_click_through(ignore: bool) -> Result<(), String> {
     Ok(())
 }
 
+// set spotlight panel click-through (ignores mouse events)
+#[tauri::command]
+fn set_spotlight_click_through(ignore: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = SPOTLIGHT_PANEL.get() {
+        panel.set_ignores_mouse_events(ignore);
+    }
+    Ok(())
+}
+
 // move mini window to top-right corner (after help mode submit)
 #[tauri::command]
 fn move_mini_to_corner(app_handle: tauri::AppHandle) -> Result<(), String> {
@@ -687,6 +697,7 @@ fn main() {
             move_mini_to_corner,
             set_mini_click_through,
             set_main_click_through,
+            set_spotlight_click_through,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

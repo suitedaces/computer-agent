@@ -38,8 +38,10 @@ export function useAgent() {
       switch (update_type) {
         case "started":
           setIsRunning(true);
-          // make main window click-through while agent runs
+          // make all windows click-through while agent runs
           invoke("set_main_click_through", { ignore: true }).catch(() => {});
+          invoke("set_mini_click_through", { ignore: true }).catch(() => {});
+          invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
           break;
 
         case "user_message":
@@ -83,12 +85,16 @@ export function useAgent() {
           setIsRunning(false);
           // disable click-through when done
           invoke("set_main_click_through", { ignore: false }).catch(() => {});
+          invoke("set_mini_click_through", { ignore: false }).catch(() => {});
+          invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
           break;
 
         case "error":
           setIsRunning(false);
           // disable click-through on error
           invoke("set_main_click_through", { ignore: false }).catch(() => {});
+          invoke("set_mini_click_through", { ignore: false }).catch(() => {});
+          invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
           addMessage({ role: "assistant", content: message, type: "error" });
           break;
 
