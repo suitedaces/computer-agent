@@ -178,17 +178,13 @@ export default function MiniWindow() {
     });
 
     // hotkey help mode - Cmd+Shift+H triggers this
-    const unlisten8 = listen("hotkey-help", async () => {
+    const unlisten8 = listen<{ screenshot: string | null }>("hotkey-help", async (e) => {
       console.log("[mini] hotkey-help received");
-      try {
-        const screenshot = await invoke<string>("capture_screen_for_help");
-        setHelpScreenshot(screenshot);
+      if (e.payload.screenshot) {
+        setHelpScreenshot(e.payload.screenshot);
         setHelpMode(true);
-        setHelpPrompt("Help me out here: ");
-        // focus input after render
-        setTimeout(() => inputRef.current?.focus(), 50);
-      } catch (e) {
-        console.error("[mini] screenshot failed:", e);
+        setHelpPrompt("");
+        setTimeout(() => inputRef.current?.focus(), 100);
       }
     });
 
@@ -236,64 +232,94 @@ export default function MiniWindow() {
   const handleHelpCancel = async () => {
     setHelpMode(false);
     setHelpScreenshot(null);
-    setHelpPrompt("Help me out here: ");
-    // resize back to idle
+    setHelpPrompt("");
+    // resize back to idle bar
     const win = getCurrentWindow();
     await win.setSize(new LogicalSize(280, 36));
+    await invoke("show_mini_window");
   };
 
-  // help mode UI - centered screenshot capture
+  // help mode UI - animated photo capture
   if (helpMode && !isRunning) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center p-3">
+      <div className="h-screen w-screen flex items-center justify-center p-4 bg-black/40">
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: "spring", damping: 20, stiffness: 300 }}
-          className="w-full bg-black/80 backdrop-blur-xl rounded-xl border border-white/10 shadow-2xl overflow-hidden"
+          initial={{ opacity: 0, scale: 0.8, rotateX: 15, y: 50 }}
+          animate={{ opacity: 1, scale: 1, rotateX: 0, y: 0 }}
+          transition={{ type: "spring", damping: 25, stiffness: 300, duration: 0.4 }}
+          className="w-full max-w-[480px]"
+          style={{ perspective: 1000 }}
         >
-          {/* screenshot preview */}
-          {helpScreenshot && (
-            <div className="p-3 pb-0">
-              <img
-                src={`data:image/jpeg;base64,${helpScreenshot}`}
-                alt="Screenshot"
-                className="w-full h-24 object-cover rounded-lg border border-white/10"
+          {/* polaroid-style photo card */}
+          <motion.div
+            initial={{ boxShadow: "0 0 0 rgba(255,255,255,0)" }}
+            animate={{ boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}
+            transition={{ delay: 0.1, duration: 0.3 }}
+            className="bg-gradient-to-b from-zinc-900 to-black rounded-2xl border border-white/10 overflow-hidden"
+          >
+            {/* screenshot with flash overlay */}
+            {helpScreenshot && (
+              <div className="relative p-3 pb-2">
+                <motion.div
+                  initial={{ opacity: 0.8 }}
+                  animate={{ opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="absolute inset-0 bg-white pointer-events-none z-10"
+                />
+                <motion.img
+                  initial={{ opacity: 0, scale: 1.02 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.15, duration: 0.3 }}
+                  src={`data:image/jpeg;base64,${helpScreenshot}`}
+                  alt="Screenshot"
+                  className="w-full rounded-xl border border-white/5"
+                />
+              </div>
+            )}
+
+            {/* prompt input */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2, duration: 0.2 }}
+              className="px-3 pb-2"
+            >
+              <input
+                ref={inputRef}
+                type="text"
+                value={helpPrompt}
+                onChange={(e) => setHelpPrompt(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleHelpSubmit()}
+                placeholder="What do you need help with?"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[13px] text-white/90 placeholder:text-white/30 focus:outline-none focus:border-white/20 focus:bg-white/10 transition-all"
+                autoFocus
               />
-            </div>
-          )}
+            </motion.div>
 
-          {/* prompt input */}
-          <div className="p-3">
-            <input
-              ref={inputRef}
-              type="text"
-              value={helpPrompt}
-              onChange={(e) => setHelpPrompt(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleHelpSubmit()}
-              placeholder="What do you need help with?"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[12px] text-white/90 placeholder:text-white/30 focus:outline-none focus:border-white/25 focus:bg-white/10 transition-all"
-              autoFocus
-            />
-          </div>
-
-          {/* action buttons */}
-          <div className="px-3 pb-3 flex gap-2">
-            <button
-              onClick={handleHelpCancel}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-[11px]"
+            {/* action buttons */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.25, duration: 0.2 }}
+              className="px-3 pb-3 flex gap-2"
             >
-              <X size={12} />
-              <span>Cancel</span>
-            </button>
-            <button
-              onClick={handleHelpSubmit}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-500/30 border border-blue-400/30 text-blue-200 hover:bg-blue-500/40 transition-all text-[11px] font-medium"
-            >
-              <Send size={12} />
-              <span>Send</span>
-            </button>
-          </div>
+              <button
+                onClick={handleHelpCancel}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-red-500/20 border border-red-400/20 text-red-300 hover:bg-red-500/30 transition-all text-[12px]"
+              >
+                <X size={14} />
+                <span>Cancel</span>
+              </button>
+              <button
+                onClick={handleHelpSubmit}
+                disabled={!helpPrompt.trim()}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-blue-500/30 border border-blue-400/30 text-blue-200 hover:bg-blue-500/40 disabled:opacity-40 disabled:cursor-not-allowed transition-all text-[12px] font-medium"
+              >
+                <Send size={14} />
+                <span>Send</span>
+              </button>
+            </motion.div>
+          </motion.div>
         </motion.div>
       </div>
     );

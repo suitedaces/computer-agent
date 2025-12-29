@@ -377,15 +377,25 @@ fn main() {
                     if event.state == ShortcutState::Pressed
                         && shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyH)
                     {
-                        // emit event to frontend - it will capture screenshot and show UI
-                        let _ = app.emit("hotkey-help", ());
+                        // capture screenshot first (before showing any UI)
+                        let screenshot = match computer::ComputerControl::new() {
+                            Ok(control) => control.take_screenshot().ok(),
+                            Err(_) => None,
+                        };
 
-                        // show mini window centered (will animate to corner after submit)
+                        // play shutter sound
+                        #[cfg(target_os = "macos")]
+                        trigger_screen_flash();
+
+                        // emit screenshot to frontend
+                        let _ = app.emit("hotkey-help", serde_json::json!({ "screenshot": screenshot }));
+
+                        // show window sized and centered for help UI
                         #[cfg(target_os = "macos")]
                         if let Some(panel) = MINI_PANEL.get() {
                             if let Some(window) = app.get_webview_window("mini") {
-                                let _ = window.set_size(tauri::LogicalSize::new(340.0, 200.0));
-                                position_window_center(&window, 340.0, 200.0);
+                                let _ = window.set_size(tauri::LogicalSize::new(520.0, 420.0));
+                                position_window_center(&window, 520.0, 420.0);
                             }
                             panel.show();
                         }
