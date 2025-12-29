@@ -1,5 +1,4 @@
 use std::process::{Command, Stdio};
-use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -8,8 +7,6 @@ pub enum BashError {
     Blocked(String),
     #[error("Execution failed: {0}")]
     Execution(String),
-    #[error("Timeout after {0} seconds")]
-    Timeout(u64),
 }
 
 // dangerous commands/patterns to block
@@ -56,20 +53,14 @@ const WARN_PATTERNS: &[&str] = &[
 ];
 
 pub struct BashExecutor {
-    timeout_secs: u64,
     working_dir: Option<String>,
 }
 
 impl BashExecutor {
     pub fn new() -> Self {
         Self {
-            timeout_secs: 30,
             working_dir: None,
         }
-    }
-
-    pub fn set_working_dir(&mut self, dir: String) {
-        self.working_dir = Some(dir);
     }
 
     fn is_blocked(&self, command: &str) -> Option<String> {

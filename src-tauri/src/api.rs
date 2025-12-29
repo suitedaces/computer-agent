@@ -1,3 +1,4 @@
+use crate::agent::AgentMode;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -7,21 +8,26 @@ use tokio::sync::mpsc;
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const BETA_HEADER: &str = "computer-use-2025-01-24";
 const API_VERSION: &str = "2023-06-01";
+
+/// display dimensions sent to claude for coordinate mapping.
+/// matches the resolution we resize screenshots to in computer.rs
 const DISPLAY_WIDTH: u32 = 1280;
 const DISPLAY_HEIGHT: u32 = 800;
+
+/// max output tokens for claude response. 16k allows for detailed responses
+/// while staying within typical rate limits
+const MAX_TOKENS: u32 = 16000;
+
+/// thinking budget for extended thinking. 5k is enough for reasoning through
+/// multi-step tasks without excessive latency
+const THINKING_BUDGET: u32 = 5000;
 
 #[derive(Error, Debug)]
 pub enum ApiError {
     #[error("HTTP request failed: {0}")]
     Request(#[from] reqwest::Error),
-    #[error("API key not set")]
-    MissingApiKey,
     #[error("API error: {0}")]
     Api(String),
-    #[error("Parse error: {0}")]
-    Parse(String),
-    #[error("Stream error: {0}")]
-    Stream(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,12 +101,6 @@ struct ApiRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ApiResponse {
-    pub content: Vec<ContentBlock>,
-    pub stop_reason: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct ApiErrorResponse {
     error: ApiErrorDetail,
 }
@@ -113,11 +113,9 @@ struct ApiErrorDetail {
 // streaming event types
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
-    TextDelta { index: usize, text: String },
-    ThinkingDelta { index: usize, thinking: String },
-    ToolUseStart { index: usize, id: String, name: String },
-    InputJsonDelta { index: usize, partial_json: String },
-    ContentBlockStop { index: usize },
+    TextDelta { text: String },
+    ThinkingDelta { thinking: String },
+    ToolUseStart { name: String },
     MessageStop,
 }
 
@@ -136,37 +134,48 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self) -> Vec<serde_json::Value> {
-        vec![
-            serde_json::json!({
+    fn build_tools(&self, mcp_tools: &[serde_json::Value], mode: AgentMode) -> Vec<serde_json::Value> {
+        let mut tools = Vec::new();
+
+        // computer tool only in computer mode
+        if mode == AgentMode::Computer {
+            tools.push(serde_json::json!({
                 "type": "computer_20250124",
                 "name": "computer",
                 "display_width_px": DISPLAY_WIDTH,
                 "display_height_px": DISPLAY_HEIGHT,
                 "display_number": 1
-            }),
-            serde_json::json!({
-                "type": "bash_20250124",
-                "name": "bash"
-            }),
-        ]
+            }));
+        }
+
+        // bash available in both modes
+        tools.push(serde_json::json!({
+            "type": "bash_20250124",
+            "name": "bash"
+        }));
+
+        // mcp tools only in browser mode (passed in already filtered)
+        tools.extend(mcp_tools.iter().cloned());
+        tools
     }
 
     pub async fn send_message_streaming(
         &self,
         messages: Vec<Message>,
         event_tx: mpsc::UnboundedSender<StreamEvent>,
+        mcp_tools: &[serde_json::Value],
+        mode: AgentMode,
     ) -> Result<Vec<ContentBlock>, ApiError> {
         let request = ApiRequest {
             model: self.model.clone(),
-            max_tokens: 16000,
+            max_tokens: MAX_TOKENS,
             system: SYSTEM_PROMPT.to_string(),
-            tools: self.build_tools(),
+            tools: self.build_tools(mcp_tools, mode),
             messages,
             stream: true,
             thinking: ThinkingConfig {
                 config_type: "enabled".to_string(),
-                budget_tokens: 5000,
+                budget_tokens: THINKING_BUDGET,
             },
         };
 
@@ -250,7 +259,7 @@ impl AnthropicClient {
                                     let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
                                     let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
                                     tool_info[index] = (id.clone(), name.clone());
-                                    let _ = event_tx.send(StreamEvent::ToolUseStart { index, id, name });
+                                    let _ = event_tx.send(StreamEvent::ToolUseStart { name });
                                 }
                             }
                         }
@@ -268,7 +277,6 @@ impl AnthropicClient {
                                             }
                                             current_thinking[index].push_str(thinking);
                                             let _ = event_tx.send(StreamEvent::ThinkingDelta {
-                                                index,
                                                 thinking: thinking.to_string(),
                                             });
                                         }
@@ -288,7 +296,6 @@ impl AnthropicClient {
                                             }
                                             current_text[index].push_str(text);
                                             let _ = event_tx.send(StreamEvent::TextDelta {
-                                                index,
                                                 text: text.to_string(),
                                             });
                                         }
@@ -299,10 +306,6 @@ impl AnthropicClient {
                                                 current_tool_json.push(String::new());
                                             }
                                             current_tool_json[index].push_str(json);
-                                            let _ = event_tx.send(StreamEvent::InputJsonDelta {
-                                                index,
-                                                partial_json: json.to_string(),
-                                            });
                                         }
                                     }
                                     _ => {}
@@ -312,7 +315,6 @@ impl AnthropicClient {
 
                         "content_block_stop" => {
                             let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
-                            let _ = event_tx.send(StreamEvent::ContentBlockStop { index });
 
                             // finalize content block based on tracked type
                             let block_type = if index < block_types.len() {
@@ -369,45 +371,6 @@ impl AnthropicClient {
         }
 
         Ok(content_blocks)
-    }
-
-    // keep non-streaming version for fallback
-    pub async fn send_message(&self, messages: Vec<Message>) -> Result<ApiResponse, ApiError> {
-        let request = ApiRequest {
-            model: self.model.clone(),
-            max_tokens: 16000,
-            system: SYSTEM_PROMPT.to_string(),
-            tools: self.build_tools(),
-            messages,
-            stream: false,
-            thinking: ThinkingConfig {
-                config_type: "enabled".to_string(),
-                budget_tokens: 5000,
-            },
-        };
-
-        let response = self
-            .client
-            .post(ANTHROPIC_API_URL)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", API_VERSION)
-            .header("anthropic-beta", BETA_HEADER)
-            .header("content-type", "application/json")
-            .json(&request)
-            .send()
-            .await?;
-
-        let status = response.status();
-        let body = response.text().await?;
-
-        if !status.is_success() {
-            if let Ok(err) = serde_json::from_str::<ApiErrorResponse>(&body) {
-                return Err(ApiError::Api(err.error.message));
-            }
-            return Err(ApiError::Api(format!("HTTP {}: {}", status, body)));
-        }
-
-        serde_json::from_str(&body).map_err(|e| ApiError::Parse(e.to_string()))
     }
 }
 

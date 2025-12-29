@@ -9,20 +9,19 @@ mod agent;
 mod api;
 mod bash;
 mod computer;
+mod mcp;
 
-use agent::{Agent, HistoryMessage};
+use agent::{Agent, AgentMode, HistoryMessage};
+use mcp::{create_shared_client, SharedMcpClient};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{
-    tray::TrayIconBuilder,
-    Manager, State,
-};
-use tauri_plugin_positioner::{Position, WindowExt};
+use tauri::{tray::TrayIconBuilder, Manager, PhysicalPosition, State};
 
 #[cfg(target_os = "macos")]
 use tauri_nspanel::{
     tauri_panel, CollectionBehavior, ManagerExt, PanelLevel, StyleMask, WebviewWindowExt,
 };
+
 
 #[cfg(target_os = "macos")]
 tauri_panel! {
@@ -37,6 +36,30 @@ tauri_panel! {
 struct AppState {
     agent: Arc<Mutex<Agent>>,
     running: Arc<std::sync::atomic::AtomicBool>,
+    mcp_client: SharedMcpClient,
+}
+
+#[cfg(target_os = "macos")]
+fn position_window_top_right(window: &tauri::WebviewWindow, width: f64, height: f64) {
+    use objc2_app_kit::NSScreen;
+    use objc2_foundation::MainThreadMarker;
+
+    if let Some(mtm) = MainThreadMarker::new() {
+        if let Some(screen) = NSScreen::mainScreen(mtm) {
+            let frame = screen.frame();
+            let visible = screen.visibleFrame();
+            let menubar_height = frame.size.height - visible.size.height - visible.origin.y;
+            let scale = unsafe { screen.backingScaleFactor() };
+
+            let padding = 10.0;
+            // x: right edge minus window width minus padding
+            let x = (frame.size.width - width - padding) * scale;
+            // y: just below menubar (in screen coords, y=0 is top after accounting for menubar)
+            let y = (menubar_height + padding) * scale;
+
+            let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
+        }
+    }
 }
 
 #[tauri::command]
@@ -56,11 +79,12 @@ async fn check_api_key(state: State<'_, AppState>) -> Result<bool, String> {
 async fn run_agent(
     instructions: String,
     model: String,
+    mode: AgentMode,
     history: Vec<HistoryMessage>,
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[taskhomie] run_agent called with: {} (model: {}, history: {} msgs)", instructions, model, history.len());
+    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs)", instructions, model, mode, history.len());
 
     let agent = state.agent.clone();
 
@@ -76,7 +100,7 @@ async fn run_agent(
 
     tokio::spawn(async move {
         let agent_guard = agent.lock().await;
-        match agent_guard.run(instructions, model, history, app_handle).await {
+        match agent_guard.run(instructions, model, mode, history, app_handle).await {
             Ok(_) => println!("[taskhomie] Agent finished"),
             Err(e) => println!("[taskhomie] Agent error: {:?}", e),
         }
@@ -102,6 +126,111 @@ fn debug_log(message: String) {
     println!("[frontend] {}", message);
 }
 
+#[tauri::command]
+async fn connect_mcp(
+    command: String,
+    args: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let mut client = state.mcp_client.write().await;
+    client
+        .connect(&command, &args_refs)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(client.get_tool_names())
+}
+
+#[tauri::command]
+async fn disconnect_mcp(state: State<'_, AppState>) -> Result<(), String> {
+    let mut client = state.mcp_client.write().await;
+    client.disconnect().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn is_mcp_connected(state: State<'_, AppState>) -> Result<bool, String> {
+    let client = state.mcp_client.read().await;
+    Ok(client.is_connected())
+}
+
+#[tauri::command]
+async fn get_mcp_tools(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let client = state.mcp_client.read().await;
+    Ok(client.get_tool_names())
+}
+
+#[tauri::command]
+fn show_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app_handle.get_webview_panel("mini") {
+        if let Some(window) = app_handle.get_webview_window("mini") {
+            // idle size (280x36 logical)
+            let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
+            position_window_top_right(&window, 280.0, 36.0);
+        }
+        panel.show();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.show();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app_handle.get_webview_panel("mini") {
+        panel.hide();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(mini_panel) = app_handle.get_webview_panel("mini") {
+            mini_panel.hide();
+        }
+        if let Ok(panel) = app_handle.get_webview_panel("main") {
+            if let Some(window) = app_handle.get_webview_window("main") {
+                position_window_top_right(&window, 420.0, 600.0);
+            }
+            panel.show_and_make_key();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(mini) = app_handle.get_webview_window("mini") {
+            let _ = mini.hide();
+        }
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app_handle.get_webview_panel("main") {
+        panel.hide();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
 fn main() {
     // load .env
     if dotenvy::dotenv().is_err() {
@@ -109,16 +238,30 @@ fn main() {
     }
 
     let running = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mcp_client = create_shared_client();
     let mut agent = Agent::new(running.clone());
+    agent.set_mcp_client(mcp_client.clone());
 
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
         println!("[taskhomie] API key loaded");
         agent.set_api_key(key);
     }
 
+    // auto-connect to chrome-devtools-mcp on startup
+    let mcp_client_clone = mcp_client.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut client = mcp_client_clone.write().await;
+            match client.connect("npx", &["-y", "chrome-devtools-mcp@latest"]).await {
+                Ok(()) => println!("[taskhomie] chrome-devtools-mcp connected"),
+                Err(e) => println!("[taskhomie] chrome-devtools-mcp failed to connect: {}", e),
+            }
+        });
+    });
+
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_positioner::init());
+        .plugin(tauri_plugin_shell::init());
 
     #[cfg(target_os = "macos")]
     {
@@ -129,36 +272,75 @@ fn main() {
         .manage(AppState {
             agent: Arc::new(Mutex::new(agent)),
             running,
+            mcp_client,
         })
         .setup(|app| {
             // hide from dock - menubar app only
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // convert window to panel for fullscreen support
+            // convert windows to panels for fullscreen support
             #[cfg(target_os = "macos")]
-            if let Some(window) = app.get_webview_window("main") {
-                if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
-                    panel.set_level(PanelLevel::Floating.value());
-                    panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
-                    panel.set_collection_behavior(
-                        CollectionBehavior::new()
-                            .full_screen_auxiliary()
-                            .can_join_all_spaces()
-                            .stationary()
-                            .into(),
-                    );
-                    panel.set_hides_on_deactivate(false);
+            {
+                // main panel
+                if let Some(window) = app.get_webview_window("main") {
+                    // pre-position offscreen to avoid flicker on first show
+                    let _ = window.set_position(PhysicalPosition::new(-1000, -1000));
+
+                    if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
+                        panel.set_level(PanelLevel::Floating.value());
+                        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                        panel.set_collection_behavior(
+                            CollectionBehavior::new()
+                                .full_screen_auxiliary()
+                                .can_join_all_spaces()
+                                .stationary()
+                                .into(),
+                        );
+                        panel.set_hides_on_deactivate(false);
+                    }
+                }
+
+                // mini panel - same setup as main for fullscreen support
+                if let Some(window) = app.get_webview_window("mini") {
+                    // ensure mini window has ?mini=true in URL (for dev mode)
+                    if let Ok(url) = window.url() {
+                        if !url.to_string().contains("mini") {
+                            let new_url = format!("{}?mini=true", url);
+                            let _ = window.eval(&format!("window.location.href = '{}'", new_url));
+                        }
+                    }
+
+                    if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
+                        panel.set_level(PanelLevel::Floating.value());
+                        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                        panel.set_collection_behavior(
+                            CollectionBehavior::new()
+                                .full_screen_auxiliary()
+                                .can_join_all_spaces()
+                                .stationary()
+                                .into(),
+                        );
+                        panel.set_hides_on_deactivate(false);
+                    }
                 }
             }
 
-            // create tray icon
+            // show mini at top right after setup (idle size: 280x36 logical)
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(window) = app.get_webview_window("mini") {
+                    let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
+                    position_window_top_right(&window, 280.0, 36.0);
+                    if let Ok(panel) = app.get_webview_panel("mini") {
+                        panel.show();
+                    }
+                }
+            }
+
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(false)
                 .on_tray_icon_event(|tray, event| {
-                    // update tray position for positioner plugin
-                    tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
-
                     if let tauri::tray::TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Left,
                         button_state: tauri::tray::MouseButtonState::Up,
@@ -166,15 +348,44 @@ fn main() {
                     } = event
                     {
                         let app = tray.app_handle();
+
                         #[cfg(target_os = "macos")]
-                        if let Ok(panel) = app.get_webview_panel("main") {
-                            if panel.is_visible() {
-                                panel.hide();
-                            } else {
-                                if let Some(window) = app.get_webview_window("main") {
-                                    let _ = window.move_window(Position::TrayBottomCenter);
+                        {
+                            let main_visible = app.get_webview_panel("main").map(|p| p.is_visible()).unwrap_or(false);
+                            let mini_visible = app.get_webview_panel("mini").map(|p| p.is_visible()).unwrap_or(false);
+
+                            if main_visible {
+                                // uncollapsed -> collapsed: hide main, show mini (idle size)
+                                if let Ok(main_panel) = app.get_webview_panel("main") {
+                                    main_panel.hide();
                                 }
-                                panel.show_and_make_key();
+                                if let Ok(mini_panel) = app.get_webview_panel("mini") {
+                                    if let Some(mini_window) = app.get_webview_window("mini") {
+                                        let _ = mini_window.set_size(tauri::LogicalSize::new(280.0, 36.0));
+                                        position_window_top_right(&mini_window, 280.0, 36.0);
+                                    }
+                                    mini_panel.show();
+                                }
+                            } else if mini_visible {
+                                // collapsed -> uncollapsed: hide mini, show main
+                                if let Ok(mini_panel) = app.get_webview_panel("mini") {
+                                    mini_panel.hide();
+                                }
+                                if let Ok(main_panel) = app.get_webview_panel("main") {
+                                    if let Some(main_window) = app.get_webview_window("main") {
+                                        position_window_top_right(&main_window, 420.0, 600.0);
+                                    }
+                                    main_panel.show_and_make_key();
+                                }
+                            } else {
+                                // nothing visible -> show collapsed (mini, idle size)
+                                if let Ok(mini_panel) = app.get_webview_panel("mini") {
+                                    if let Some(mini_window) = app.get_webview_window("mini") {
+                                        let _ = mini_window.set_size(tauri::LogicalSize::new(280.0, 36.0));
+                                        position_window_top_right(&mini_window, 280.0, 36.0);
+                                    }
+                                    mini_panel.show();
+                                }
                             }
                         }
                         #[cfg(not(target_os = "macos"))]
@@ -182,7 +393,6 @@ fn main() {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
-                                let _ = window.move_window(Position::TrayBottomCenter);
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
@@ -206,6 +416,14 @@ fn main() {
             stop_agent,
             is_agent_running,
             debug_log,
+            connect_mcp,
+            disconnect_mcp,
+            is_mcp_connected,
+            get_mcp_tools,
+            show_mini_window,
+            hide_mini_window,
+            show_main_window,
+            hide_main_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { AgentState, ModelId } from "../types";
+import { AgentMode, AgentState, ModelId } from "../types";
 
 function toPastTense(text: string): string {
   const replacements: [RegExp, string][] = [
@@ -30,6 +30,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   apiKeySet: false,
   inputText: "",
   selectedModel: "claude-haiku-4-5-20251001" as ModelId,
+  selectedMode: "computer" as AgentMode,
   streamingText: "",
   streamingThinking: "",
 
@@ -78,6 +79,8 @@ export const useAgentStore = create<AgentState>((set) => ({
   setInputText: (inputText) => set({ inputText }),
 
   setSelectedModel: (selectedModel) => set({ selectedModel }),
+
+  setSelectedMode: (selectedMode) => set({ selectedMode }),
 
   clearMessages: () => set({ messages: [] }),
 

@@ -1,6 +1,7 @@
 use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, StreamEvent, ToolResultContent};
 use crate::bash::BashExecutor;
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
+use crate::mcp::{McpClient, McpError, SharedMcpClient};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -14,10 +15,23 @@ pub enum AgentError {
     Api(#[from] ApiError),
     #[error("Computer error: {0}")]
     Computer(#[from] ComputerError),
-    #[error("Stopped by user")]
-    Stopped,
+    #[error("MCP error: {0}")]
+    Mcp(#[from] McpError),
     #[error("No API key set")]
     NoApiKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentMode {
+    Computer,
+    Browser,
+}
+
+impl Default for AgentMode {
+    fn default() -> Self {
+        Self::Computer
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +59,7 @@ pub struct Agent {
     running: Arc<AtomicBool>,
     computer: Mutex<Option<ComputerControl>>,
     bash: Mutex<BashExecutor>,
+    mcp_client: Option<SharedMcpClient>,
 }
 
 impl Agent {
@@ -54,7 +69,12 @@ impl Agent {
             running,
             computer: Mutex::new(None),
             bash: Mutex::new(BashExecutor::new()),
+            mcp_client: None,
         }
+    }
+
+    pub fn set_mcp_client(&mut self, client: SharedMcpClient) {
+        self.mcp_client = Some(client);
     }
 
     pub fn set_api_key(&mut self, key: String) {
@@ -69,18 +89,15 @@ impl Agent {
         self.running.load(Ordering::SeqCst)
     }
 
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
-    }
-
     pub async fn run(
         &self,
         instructions: String,
         model: String,
+        mode: AgentMode,
         history: Vec<HistoryMessage>,
         app_handle: AppHandle,
     ) -> Result<(), AgentError> {
-        println!("[agent] run() starting with: {} (model: {}, history: {} msgs)", instructions, model, history.len());
+        println!("[agent] run() starting with: {} (model: {}, mode: {:?}, history: {} msgs)", instructions, model, mode, history.len());
 
         let api_key = self.api_key.clone().ok_or(AgentError::NoApiKey)?;
         println!("[agent] API key present");
@@ -102,11 +119,35 @@ impl Agent {
 
         self.running.store(true, Ordering::SeqCst);
 
+        // get mcp tools only in browser mode
+        let mcp_tools = if mode == AgentMode::Browser {
+            if let Some(ref mcp_client) = self.mcp_client {
+                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
+                if client.is_connected() {
+                    let tools = client.get_tools_for_claude();
+                    println!("[agent] MCP tools available: {}", tools.len());
+                    tools
+                } else {
+                    println!("[agent] MCP client not connected");
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            }
+        } else {
+            println!("[agent] Computer mode - skipping MCP tools");
+            Vec::new()
+        };
+
         let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
 
-        // emit started
+        // emit started to both windows
         self.emit(&app_handle, "started", "Agent started", None, None);
+        match app_handle.emit("agent:started", ()) {
+            Ok(_) => println!("[agent] agent:started emitted OK"),
+            Err(e) => println!("[agent] agent:started emit FAILED: {:?}", e),
+        }
         println!("[agent] Emitted started event");
 
         // add conversation history first
@@ -125,12 +166,13 @@ impl Agent {
             }],
         });
 
-        // agent loop
-        let max_iterations = 50;
+        // agent loop - limit iterations to prevent runaway tasks.
+        // 50 is enough for complex multi-step tasks while providing a safety bound
+        const MAX_ITERATIONS: usize = 50;
         let mut iteration = 0;
         println!("[agent] Starting agent loop");
 
-        while self.running.load(Ordering::SeqCst) && iteration < max_iterations {
+        while self.running.load(Ordering::SeqCst) && iteration < MAX_ITERATIONS {
             iteration += 1;
             println!("[agent] Iteration {}", iteration);
 
@@ -143,7 +185,7 @@ impl Agent {
             let stream_task = tokio::spawn(async move {
                 while let Some(event) = event_rx.recv().await {
                     match event {
-                        StreamEvent::ThinkingDelta { thinking, .. } => {
+                        StreamEvent::ThinkingDelta { thinking } => {
                             use tauri::Manager;
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
                                 let _ = window.emit("agent-stream", serde_json::json!({
@@ -152,7 +194,7 @@ impl Agent {
                                 }));
                             }
                         }
-                        StreamEvent::TextDelta { text, .. } => {
+                        StreamEvent::TextDelta { text } => {
                             use tauri::Manager;
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
                                 let _ = window.emit("agent-stream", serde_json::json!({
@@ -160,8 +202,10 @@ impl Agent {
                                     "text": text
                                 }));
                             }
+                            // also emit globally for mini window
+                            let _ = app_handle_clone.emit("agent:text_delta", serde_json::json!({ "delta": text }));
                         }
-                        StreamEvent::ToolUseStart { name, .. } => {
+                        StreamEvent::ToolUseStart { name } => {
                             use tauri::Manager;
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
                                 let _ = window.emit("agent-stream", serde_json::json!({
@@ -170,12 +214,12 @@ impl Agent {
                                 }));
                             }
                         }
-                        _ => {}
+                        StreamEvent::MessageStop => {}
                     }
                 }
             });
 
-            let response_content = match client.send_message_streaming(messages.clone(), event_tx).await {
+            let response_content = match client.send_message_streaming(messages.clone(), event_tx, &mcp_tools, mode).await {
                 Ok(content) => {
                     println!("[agent] API streaming response complete, {} blocks", content.len());
                     content
@@ -246,6 +290,14 @@ impl Agent {
                                 Some(input.clone()),
                                 None,
                             );
+                            // emit globally for mini
+                            match app_handle.emit("agent:action", serde_json::json!({
+                                "action": action.action,
+                                "text": action.text
+                            })) {
+                                Ok(_) => println!("[agent] agent:action emitted OK"),
+                                Err(e) => println!("[agent] agent:action emit FAILED: {:?}", e),
+                            }
 
                             // get window id for native screenshot exclusion
                             #[cfg(target_os = "macos")]
@@ -253,6 +305,9 @@ impl Agent {
                                 use tauri_nspanel::ManagerExt;
                                 app_handle.get_webview_panel("main").ok().map(|panel| {
                                     let ns_panel = panel.as_panel();
+                                    // SAFETY: NSPanel inherits from NSWindow, windowNumber is a valid
+                                    // selector that returns the window's unique identifier as NSInteger.
+                                    // The cast to u32 is safe because window numbers are non-negative.
                                     unsafe {
                                         let num: isize = objc2::msg_send![ns_panel, windowNumber];
                                         num as u32
@@ -355,22 +410,24 @@ impl Agent {
                                     format!("$ {}", cmd)
                                 };
                                 self.emit(&app_handle, "action", &preview, Some(input.clone()), None);
+                                // emit globally for mini
+                                let _ = app_handle.emit("agent:bash", serde_json::json!({ "command": cmd }));
 
                                 // execute
                                 let bash = self.bash.lock().await;
                                 let result = bash.execute(cmd);
 
-                                let (output, exit_code) = match result {
+                                let output = match result {
                                     Ok(out) => {
                                         let code = out.exit_code;
                                         let text = out.to_string();
                                         self.emit_with_exit_code(&app_handle, "bash_result", &text, None, None, Some(code));
-                                        (text, code)
+                                        text
                                     }
                                     Err(e) => {
                                         let err_msg = format!("Error: {}", e);
                                         self.emit_with_exit_code(&app_handle, "bash_result", &err_msg, None, None, Some(-1));
-                                        (err_msg, -1)
+                                        err_msg
                                     }
                                 };
 
@@ -379,11 +436,65 @@ impl Agent {
                                     content: vec![ToolResultContent::Text { text: output }],
                                 });
                             }
+                        } else if let Some(ref mcp_client) = self.mcp_client {
+                            // check if it's an mcp tool
+                            let is_mcp_tool = {
+                                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
+                                client.has_tool(name)
+                            };
+
+                            if is_mcp_tool {
+                                println!("[agent] Calling MCP tool: {}", name);
+                                self.emit(
+                                    &app_handle,
+                                    "action",
+                                    &format!("MCP: {}", name),
+                                    Some(input.clone()),
+                                    None,
+                                );
+                                // emit globally for mini
+                                let _ = app_handle.emit("agent:mcp_tool", serde_json::json!({ "name": name }));
+
+                                let arguments = input.as_object().cloned();
+                                println!("[agent] MCP tool args: {:?}", arguments);
+                                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
+                                let result: Result<String, McpError> = client.call_tool(name, arguments).await;
+
+                                match result {
+                                    Ok(output) => {
+                                        println!("[agent] MCP tool success: {}", &output[..output.len().min(200)]);
+                                        self.emit(&app_handle, "mcp_result", &output, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: output }],
+                                        });
+                                    }
+                                    Err(e) => {
+                                        let err_msg = format!("MCP error: {}", e);
+                                        println!("[agent] MCP tool failed: {}", err_msg);
+                                        self.emit(&app_handle, "error", &err_msg, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: err_msg }],
+                                        });
+                                    }
+                                }
+                            }
                         }
                     }
 
                     _ => {}
                 }
+            }
+
+            // clear streaming text in mini on each message complete
+            let _ = app_handle.emit("agent:message", ());
+
+            // check if stopped during tool execution
+            if !self.running.load(Ordering::SeqCst) {
+                println!("[agent] Stopped by user");
+                self.emit(&app_handle, "finished", "Stopped", None, None);
+                break;
             }
 
             // if no tools were used, the task is complete
@@ -400,6 +511,7 @@ impl Agent {
         }
 
         self.running.store(false, Ordering::SeqCst);
+        let _ = app_handle.emit("agent:stopped", ());
         Ok(())
     }
 

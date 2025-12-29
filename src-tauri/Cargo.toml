@@ -43,6 +43,9 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
+# mcp client
+rmcp = { version = "0.9", features = ["client", "transport-child-process"] }
+
 # allocator
 mimalloc = "0.1"
 
@@ -52,5 +55,19 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.
 core-graphics = "0.24"
 core-foundation = "0.10"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSScreen"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# allow common patterns
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+too_many_lines = "allow"
 

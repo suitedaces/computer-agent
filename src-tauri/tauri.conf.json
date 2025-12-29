@@ -23,6 +23,19 @@
         "visible": false,
         "skipTaskbar": true,
         "alwaysOnTop": true
+      },
+      {
+        "label": "mini",
+        "title": "taskhomie-mini",
+        "url": "index.html?mini=true",
+        "width": 300,
+        "height": 220,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true
       }
     ],
     "macOSPrivateApi": true,

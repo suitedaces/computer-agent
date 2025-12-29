@@ -16,7 +16,9 @@ import {
   ChevronUp,
   Brain,
   Clock,
+  Minus,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
   const [expanded, setExpanded] = useState(true);
@@ -292,7 +294,7 @@ function StreamingBubble() {
 }
 
 export default function App() {
-  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, streamingText, streamingThinking } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking } = useAgentStore();
   const { toggle, submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -329,18 +331,52 @@ export default function App() {
         <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">
           taskhomie
         </span>
-        <select
-          value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value as ModelId)}
-          disabled={isRunning}
-          className="glass-select"
-        >
-          {MODELS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          {/* mode toggle */}
+          <div className="flex rounded-md overflow-hidden border border-white/10">
+            <button
+              onClick={() => setSelectedMode("computer")}
+              disabled={isRunning}
+              className={`px-2 py-1 text-[10px] transition-colors ${
+                selectedMode === "computer"
+                  ? "bg-white/15 text-white/90"
+                  : "text-white/40 hover:text-white/60"
+              } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              computer
+            </button>
+            <button
+              onClick={() => setSelectedMode("browser")}
+              disabled={isRunning}
+              className={`px-2 py-1 text-[10px] transition-colors ${
+                selectedMode === "browser"
+                  ? "bg-white/15 text-white/90"
+                  : "text-white/40 hover:text-white/60"
+              } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              browser
+            </button>
+          </div>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value as ModelId)}
+            disabled={isRunning}
+            className="glass-select"
+          >
+            {MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => invoke("show_mini_window").then(() => invoke("hide_main_window"))}
+            className="w-6 h-6 flex items-center justify-center rounded-md text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+            title="Collapse"
+          >
+            <Minus size={12} />
+          </button>
+        </div>
       </div>
 
       {/* messages */}
