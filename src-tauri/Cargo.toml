@@ -61,6 +61,7 @@ foreign-types = "0.5"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSScreen"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+dispatch = "0.2"
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "warn"

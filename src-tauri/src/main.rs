@@ -10,6 +10,7 @@ mod api;
 mod bash;
 mod computer;
 mod mcp;
+mod panels;
 
 use agent::{Agent, AgentMode, HistoryMessage};
 use mcp::{create_shared_client, SharedMcpClient};
@@ -56,15 +57,9 @@ struct ScreenInfo {
 #[cfg(target_os = "macos")]
 static SCREEN_INFO: std::sync::OnceLock<ScreenInfo> = std::sync::OnceLock::new();
 
-// cached panel handles for instant access (avoids mutex lock on every operation)
+// re-export panel handles from shared module
 #[cfg(target_os = "macos")]
-static MAIN_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
-#[cfg(target_os = "macos")]
-static MINI_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
-#[cfg(target_os = "macos")]
-static SPOTLIGHT_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
-#[cfg(target_os = "macos")]
-static BORDER_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
+use panels::{MAIN_PANEL, MINI_PANEL, SPOTLIGHT_PANEL, BORDER_PANEL};
 
 #[cfg(target_os = "macos")]
 fn get_screen_info() -> &'static ScreenInfo {
@@ -377,6 +372,21 @@ fn hide_border_overlay() {
     #[cfg(target_os = "macos")]
     if let Some(panel) = BORDER_PANEL.get() {
         panel.hide();
+    }
+}
+
+// take screenshot excluding our app windows - uses shared panels module
+#[tauri::command]
+fn take_screenshot_excluding_app() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        panels::take_screenshot_excluding_app()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let control = computer::ComputerControl::new().map_err(|e| e.to_string())?;
+        control.take_screenshot().map_err(|e| e.to_string())
     }
 }
 
@@ -777,6 +787,7 @@ fn main() {
             set_spotlight_click_through,
             show_border_overlay,
             hide_border_overlay,
+            take_screenshot_excluding_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

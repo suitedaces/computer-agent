@@ -96,7 +96,7 @@ impl ComputerControl {
         Ok(BASE64.encode(&buffer))
     }
 
-    /// take screenshot excluding our app windows - falls back to regular screenshot if filtering fails
+    /// take screenshot excluding our app windows - captures everything BELOW the given window
     #[cfg(target_os = "macos")]
     pub fn take_screenshot_excluding(&self, window_id: u32) -> Result<String, ComputerError> {
         use core_graphics::window::{
@@ -104,12 +104,12 @@ impl ComputerControl {
             CGWindowListCreateImage,
         };
 
-        // capture all windows BELOW our window (excludes our app)
         let bounds = CGRect::new(
             &CGPoint::new(0.0, 0.0),
             &CGSize::new(self.screen_width as f64, self.screen_height as f64),
         );
 
+        // capture all windows BELOW our window (excludes our app and everything above it)
         let options = kCGWindowListOptionOnScreenBelowWindow | kCGWindowListExcludeDesktopElements;
 
         let cg_image = unsafe {
@@ -120,7 +120,6 @@ impl ComputerControl {
                 kCGWindowImageDefault,
             );
             if img_ptr.is_null() {
-                // fallback to xcap
                 return self.take_screenshot();
             }
             core_graphics::image::CGImage::from_ptr(img_ptr)

@@ -329,29 +329,6 @@ impl Agent {
                                 Err(e) => println!("[agent] agent:action emit FAILED: {:?}", e),
                             }
 
-                            // get topmost visible panel window id for screenshot exclusion
-                            #[cfg(target_os = "macos")]
-                            let window_id: Option<u32> = {
-                                use tauri_nspanel::ManagerExt;
-                                // check spotlight first (topmost when visible), then main
-                                let panels = ["spotlight", "main", "mini"];
-                                panels.iter().find_map(|name| {
-                                    app_handle.get_webview_panel(name).ok().and_then(|panel| {
-                                        if panel.is_visible() {
-                                            let ns_panel = panel.as_panel();
-                                            Some(unsafe {
-                                                let num: isize = objc2::msg_send![ns_panel, windowNumber];
-                                                num as u32
-                                            })
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                })
-                            };
-                            #[cfg(not(target_os = "macos"))]
-                            let window_id: Option<u32> = None;
-
                             // execute action on blocking thread (enigo requires main-thread-like context)
                             let action_clone = action.clone();
                             let screen_w = {
@@ -371,19 +348,13 @@ impl Agent {
 
                             match result {
                                 Ok(_action_result) => {
-                                    // always take screenshot with window exclusion
+                                    // take screenshot excluding app windows
+                                    // must run on main thread for Panel access on macOS
                                     let screenshot = {
                                         #[cfg(target_os = "macos")]
                                         {
-                                            if let Some(wid) = window_id {
-                                                let computer_guard = self.computer.lock().await;
-                                                let computer = computer_guard.as_ref().unwrap();
-                                                computer.take_screenshot_excluding(wid)?
-                                            } else {
-                                                let computer_guard = self.computer.lock().await;
-                                                let computer = computer_guard.as_ref().unwrap();
-                                                computer.take_screenshot()?
-                                            }
+                                            crate::panels::take_screenshot_excluding_app()
+                                                .map_err(|e| AgentError::Computer(ComputerError::Screenshot(e)))?
                                         }
                                         #[cfg(not(target_os = "macos"))]
                                         {
