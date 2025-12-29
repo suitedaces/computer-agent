@@ -6,7 +6,13 @@ Built with Tauri, React, and Rust.
 
 
 ## Demo
-https://github.com/user-attachments/assets/92223003-80ae-4877-b16d-f5b4ab26ace5
+
+https://github.com/user-attachments/assets/8edd92a7-7d3e-472a-9e48-3b561f0257d6
+
+Here, I used it to autonomously read and reply to tweets, lol. This is purely for demonstration/research, you should not attempt to do the same, lol.
+
+
+
 
 
 ## Disclaimers
