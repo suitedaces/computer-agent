@@ -42,6 +42,11 @@ export function useAgent() {
           invoke("set_main_click_through", { ignore: true }).catch(() => {});
           break;
 
+        case "user_message":
+          // user message from backend (for cross-window sync)
+          addMessage({ role: "user", content: message, screenshot });
+          break;
+
         case "thinking":
           clearStreamingThinking();
           addMessage({ role: "assistant", content: message, type: "thinking" });
@@ -115,8 +120,8 @@ export function useAgent() {
     };
   }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking]);
 
-  const submit = useCallback(async () => {
-    const text = inputText.trim();
+  const submit = useCallback(async (overrideText?: string, contextScreenshot?: string) => {
+    const text = (overrideText ?? inputText).trim();
     if (!text || isRunning) return;
 
     // build history from past messages (user + assistant text only)
@@ -126,10 +131,10 @@ export function useAgent() {
 
     // add user message
     addMessage({ role: "user", content: text });
-    setInputText("");
+    if (!overrideText) setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: null });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: contextScreenshot ?? null });
     } catch (error) {
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);

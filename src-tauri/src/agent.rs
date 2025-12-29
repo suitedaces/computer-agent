@@ -144,13 +144,20 @@ impl Agent {
         let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
 
-        // emit started to both windows
+        // emit started to all windows
         self.emit(&app_handle, "started", "Agent started", None, None);
-        match app_handle.emit("agent:started", ()) {
-            Ok(_) => println!("[agent] agent:started emitted OK"),
-            Err(e) => println!("[agent] agent:started emit FAILED: {:?}", e),
-        }
-        println!("[agent] Emitted started event");
+        let _ = app_handle.emit("agent:started", ());
+
+        // emit user message so all windows can display it
+        let _ = app_handle.emit("agent-update", AgentUpdate {
+            update_type: "user_message".to_string(),
+            message: instructions.clone(),
+            action: None,
+            screenshot: context_screenshot.clone(),
+            bash_command: None,
+            exit_code: None,
+        });
+        println!("[agent] Emitted started + user_message events");
 
         // add conversation history first
         for msg in history {
@@ -204,35 +211,24 @@ impl Agent {
                 while let Some(event) = event_rx.recv().await {
                     match event {
                         StreamEvent::ThinkingDelta { thinking } => {
-                            use tauri::Manager;
-                            if let Some(window) = app_handle_clone.get_webview_window("main") {
-                                let _ = window.emit("agent-stream", serde_json::json!({
-                                    "type": "thinking_delta",
-                                    "text": thinking
-                                }));
-                            }
-                            // also emit globally for mini window
-                            let _ = app_handle_clone.emit("agent:thinking_delta", serde_json::json!({ "delta": thinking }));
+                            // emit globally so all windows receive it
+                            let _ = app_handle_clone.emit("agent-stream", serde_json::json!({
+                                "type": "thinking_delta",
+                                "text": thinking
+                            }));
                         }
                         StreamEvent::TextDelta { text } => {
-                            use tauri::Manager;
-                            if let Some(window) = app_handle_clone.get_webview_window("main") {
-                                let _ = window.emit("agent-stream", serde_json::json!({
-                                    "type": "text_delta",
-                                    "text": text
-                                }));
-                            }
-                            // also emit globally for mini window
-                            let _ = app_handle_clone.emit("agent:text_delta", serde_json::json!({ "delta": text }));
+                            // emit globally so all windows receive it
+                            let _ = app_handle_clone.emit("agent-stream", serde_json::json!({
+                                "type": "text_delta",
+                                "text": text
+                            }));
                         }
                         StreamEvent::ToolUseStart { name } => {
-                            use tauri::Manager;
-                            if let Some(window) = app_handle_clone.get_webview_window("main") {
-                                let _ = window.emit("agent-stream", serde_json::json!({
-                                    "type": "tool_start",
-                                    "name": name
-                                }));
-                            }
+                            let _ = app_handle_clone.emit("agent-stream", serde_json::json!({
+                                "type": "tool_start",
+                                "name": name
+                            }));
                         }
                         StreamEvent::MessageStop => {}
                     }
@@ -555,7 +551,6 @@ impl Agent {
         screenshot: Option<String>,
         exit_code: Option<i32>,
     ) {
-        use tauri::Manager;
         let payload = AgentUpdate {
             update_type: update_type.to_string(),
             message: message.to_string(),
@@ -564,13 +559,10 @@ impl Agent {
             bash_command: None,
             exit_code,
         };
-        if let Some(window) = app_handle.get_webview_window("main") {
-            match window.emit("agent-update", payload) {
-                Ok(_) => println!("[agent] Emit success: {}", update_type),
-                Err(e) => println!("[agent] Emit FAILED: {} - {:?}", update_type, e),
-            }
-        } else {
-            println!("[agent] Window 'main' not found!");
+        // emit globally so both main and spotlight windows receive events
+        match app_handle.emit("agent-update", payload) {
+            Ok(_) => println!("[agent] Emit success: {}", update_type),
+            Err(e) => println!("[agent] Emit FAILED: {} - {:?}", update_type, e),
         }
     }
 }

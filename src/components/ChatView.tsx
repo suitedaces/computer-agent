@@ -213,6 +213,16 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       className={`flex ${isUser ? "justify-end" : "justify-start"}`}
     >
       <div className={getBubbleStyle()}>
+        {/* user message with screenshot */}
+        {isUser && msg.screenshot && (
+          <div className="mb-2 rounded-lg overflow-hidden">
+            <img
+              src={`data:image/jpeg;base64,${msg.screenshot}`}
+              alt="Context"
+              className="w-full max-w-[300px] h-auto rounded-lg"
+            />
+          </div>
+        )}
         <div className="flex items-start gap-2">
           {icon && <span className="mt-0.5 text-white/50">{icon}</span>}
           {msg.type === "thinking" || msg.type === "info" ? (
@@ -401,7 +411,10 @@ export default function ChatView({ variant }: ChatViewProps) {
             {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
           <button
-            onClick={() => invoke("minimize_to_mini")}
+            onClick={() => {
+              if (isSpotlight) invoke("hide_spotlight_window");
+              invoke("minimize_to_mini");
+            }}
             className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
             title="Collapse"
           >
@@ -459,7 +472,7 @@ export default function ChatView({ variant }: ChatViewProps) {
               }}
             />
             <motion.button
-              onClick={submit}
+              onClick={() => submit()}
               disabled={!inputText.trim()}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}

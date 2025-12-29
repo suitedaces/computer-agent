@@ -32,9 +32,7 @@ export default function MiniWindow() {
   useEffect(() => {
     const unlisten1 = listen("agent:started", () => {
       setIsRunning(true);
-      // hide mini, show main window instead
-      invoke("hide_mini_window").catch(() => {});
-      invoke("show_main_window").catch(() => {});
+      // mini window handles its own visibility - don't interfere with spotlight
     });
 
     const unlisten2 = listen("agent:stopped", () => {
@@ -69,15 +67,16 @@ export default function MiniWindow() {
   const handleHelpSubmit = async () => {
     if (!helpPrompt.trim() || !helpScreenshot) return;
     try {
-      // hide mini window
       await invoke("hide_mini_window");
-
-      // show spotlight window with screenshot context
       await invoke("show_spotlight_window");
 
-      // emit event to spotlight with screenshot and prompt
-      const { emit } = await import("@tauri-apps/api/event");
-      await emit("spotlight:open", { screenshot: helpScreenshot, prompt: helpPrompt });
+      await invoke("run_agent", {
+        instructions: helpPrompt,
+        model: "claude-sonnet-4-5",
+        mode: "computer",
+        history: [],
+        contextScreenshot: helpScreenshot,
+      });
 
       setHelpMode(false);
       setHelpScreenshot(null);
