@@ -1,4 +1,4 @@
-# Taskhomie Computer Use AI Agent
+# Taskhomie (Computer Use AI Agent)
 
 Local AI agent that controls your computer. Give it natural language instructions and watch Claude take screenshots, move your mouse, click, type, and run terminal commands.
 
