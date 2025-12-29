@@ -15,6 +15,10 @@ use core_graphics::geometry::{CGRect, CGPoint, CGSize};
 #[cfg(target_os = "macos")]
 use core_graphics::window::kCGWindowImageDefault;
 #[cfg(target_os = "macos")]
+use core_graphics::event::{CGEvent, CGEventFlags, CGKeyCode, CGEventTapLocation};
+#[cfg(target_os = "macos")]
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+#[cfg(target_os = "macos")]
 use foreign_types::ForeignType;
 
 // jpeg quality (1-100) - lower = faster + smaller, 60 is good for screenshots
@@ -272,7 +276,7 @@ impl ComputerControl {
                 if let Some(key_str) = &action.text {
                     #[cfg(target_os = "macos")]
                     {
-                        self.press_key_applescript(key_str)?;
+                        self.press_key_cgevent(key_str)?;
                     }
                     #[cfg(not(target_os = "macos"))]
                     {
@@ -292,12 +296,14 @@ impl ComputerControl {
                 let amount = action.scroll_amount.unwrap_or(3);
                 let direction = action.scroll_direction.as_deref().unwrap_or("down");
 
+                // enigo scroll: positive = down, negative = up
+                // horizontal: positive = right, negative = left
                 let scroll_amount = match direction {
-                    "up" => amount,
-                    "down" => -amount,
+                    "up" => -amount,
+                    "down" => amount,
                     "left" => -amount,
                     "right" => amount,
-                    _ => -amount,
+                    _ => amount,
                 };
 
                 if direction == "up" || direction == "down" {
@@ -350,58 +356,135 @@ impl ComputerControl {
     }
 
     #[cfg(target_os = "macos")]
-    fn press_key_applescript(&self, key_str: &str) -> Result<(), ComputerError> {
-        use std::process::Command;
-
+    fn press_key_cgevent(&self, key_str: &str) -> Result<(), ComputerError> {
         // parse the key combo (e.g. "cmd+t", "ctrl+shift+a")
         let parts: Vec<&str> = key_str.split('+').collect();
-        let mut modifiers = Vec::new();
+        let mut flags = CGEventFlags::empty();
         let mut main_key = String::new();
 
         for part in parts {
             let part_lower = part.to_lowercase();
             match part_lower.as_str() {
-                "cmd" | "command" | "super" | "meta" => modifiers.push("command down"),
-                "ctrl" | "control" => modifiers.push("control down"),
-                "alt" | "option" => modifiers.push("option down"),
-                "shift" => modifiers.push("shift down"),
+                "cmd" | "command" | "super" | "meta" => flags |= CGEventFlags::CGEventFlagCommand,
+                "ctrl" | "control" => flags |= CGEventFlags::CGEventFlagControl,
+                "alt" | "option" => flags |= CGEventFlags::CGEventFlagAlternate,
+                "shift" => flags |= CGEventFlags::CGEventFlagShift,
                 _ => main_key = part_lower,
             }
         }
 
-        // map key names to applescript key codes or key names
-        let key_code = match main_key.as_str() {
-            "return" | "enter" => "return",
-            "tab" => "tab",
-            "escape" | "esc" => "escape",
-            "space" => "space",
-            "delete" | "backspace" => "delete",
-            "up" | "uparrow" => "up arrow",
-            "down" | "downarrow" => "down arrow",
-            "left" | "leftarrow" => "left arrow",
-            "right" | "rightarrow" => "right arrow",
-            k => k,
+        // map key names to CGKeyCode (from core_graphics::event::KeyCode)
+        let key_code: CGKeyCode = match main_key.as_str() {
+            "return" | "enter" => 0x24,
+            "tab" => 0x30,
+            "space" => 0x31,
+            "delete" | "backspace" => 0x33,
+            "escape" | "esc" => 0x35,
+            "forwarddelete" => 0x75,
+            "up" | "uparrow" => 0x7E,
+            "down" | "downarrow" => 0x7D,
+            "left" | "leftarrow" => 0x7B,
+            "right" | "rightarrow" => 0x7C,
+            "home" => 0x73,
+            "end" => 0x77,
+            "pageup" => 0x74,
+            "pagedown" => 0x79,
+            "f1" => 0x7A,
+            "f2" => 0x78,
+            "f3" => 0x63,
+            "f4" => 0x76,
+            "f5" => 0x60,
+            "f6" => 0x61,
+            "f7" => 0x62,
+            "f8" => 0x64,
+            "f9" => 0x65,
+            "f10" => 0x6D,
+            "f11" => 0x67,
+            "f12" => 0x6F,
+            // single character - map to key code
+            _ => self.char_to_keycode(&main_key)?,
         };
 
-        let modifier_str = if modifiers.is_empty() {
-            String::new()
-        } else {
-            format!(" using {{{}}}", modifiers.join(", "))
-        };
+        // create event source
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .map_err(|_| ComputerError::Input("failed to create event source".to_string()))?;
 
-        let script = format!(
-            r#"tell application "System Events" to keystroke "{}"{}
-"#,
-            key_code, modifier_str
-        );
+        // key down
+        let key_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
+            .map_err(|_| ComputerError::Input("failed to create key down event".to_string()))?;
+        if !flags.is_empty() {
+            key_down.set_flags(flags);
+        }
+        key_down.post(CGEventTapLocation::HID);
 
-        Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .output()
-            .map_err(|e| ComputerError::Input(e.to_string()))?;
+        // small delay between down and up
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // key up
+        let key_up = CGEvent::new_keyboard_event(source, key_code, false)
+            .map_err(|_| ComputerError::Input("failed to create key up event".to_string()))?;
+        if !flags.is_empty() {
+            key_up.set_flags(flags);
+        }
+        key_up.post(CGEventTapLocation::HID);
 
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn char_to_keycode(&self, c: &str) -> Result<CGKeyCode, ComputerError> {
+        // map single characters to their key codes
+        let code = match c.chars().next() {
+            Some('a') => 0x00,
+            Some('s') => 0x01,
+            Some('d') => 0x02,
+            Some('f') => 0x03,
+            Some('h') => 0x04,
+            Some('g') => 0x05,
+            Some('z') => 0x06,
+            Some('x') => 0x07,
+            Some('c') => 0x08,
+            Some('v') => 0x09,
+            Some('b') => 0x0B,
+            Some('q') => 0x0C,
+            Some('w') => 0x0D,
+            Some('e') => 0x0E,
+            Some('r') => 0x0F,
+            Some('y') => 0x10,
+            Some('t') => 0x11,
+            Some('1') => 0x12,
+            Some('2') => 0x13,
+            Some('3') => 0x14,
+            Some('4') => 0x15,
+            Some('6') => 0x16,
+            Some('5') => 0x17,
+            Some('9') => 0x19,
+            Some('7') => 0x1A,
+            Some('8') => 0x1C,
+            Some('0') => 0x1D,
+            Some('o') => 0x1F,
+            Some('u') => 0x20,
+            Some('i') => 0x22,
+            Some('p') => 0x23,
+            Some('l') => 0x25,
+            Some('j') => 0x26,
+            Some('k') => 0x28,
+            Some('n') => 0x2D,
+            Some('m') => 0x2E,
+            Some('-') => 0x1B,
+            Some('=') => 0x18,
+            Some('[') => 0x21,
+            Some(']') => 0x1E,
+            Some('\\') => 0x2A,
+            Some(';') => 0x29,
+            Some('\'') => 0x27,
+            Some(',') => 0x2B,
+            Some('.') => 0x2F,
+            Some('/') => 0x2C,
+            Some('`') => 0x32,
+            _ => return Err(ComputerError::Input(format!("unknown key: {}", c))),
+        };
+        Ok(code)
     }
 
     #[cfg(not(target_os = "macos"))]
