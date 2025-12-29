@@ -129,12 +129,11 @@ export function useAgent() {
       .filter(m => m.role === "user" || (m.role === "assistant" && m.type === "thinking"))
       .map(m => ({ role: m.role, content: m.content }));
 
-    // add user message
-    addMessage({ role: "user", content: text });
+    // clear input before invoking (user message comes from backend via user_message event)
     if (!overrideText) setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: contextScreenshot ?? null });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, context_screenshot: contextScreenshot ?? null });
     } catch (error) {
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);

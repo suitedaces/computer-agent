@@ -75,7 +75,7 @@ export default function MiniWindow() {
         model: "claude-sonnet-4-5",
         mode: "computer",
         history: [],
-        contextScreenshot: helpScreenshot,
+        context_screenshot: helpScreenshot,
       });
 
       setHelpMode(false);
