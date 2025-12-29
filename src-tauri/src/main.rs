@@ -15,7 +15,11 @@ use agent::{Agent, AgentMode, HistoryMessage};
 use mcp::{create_shared_client, SharedMcpClient};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{tray::TrayIconBuilder, Emitter, Manager, PhysicalPosition, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Emitter, Manager, PhysicalPosition, State,
+};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 #[cfg(target_os = "macos")]
@@ -658,9 +662,20 @@ fn main() {
             }
 
 
+            // tray menu with quit option
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&quit])?;
+
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(false)
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    if event.id.as_ref() == "quit" {
+                        app.exit(0);
+                    }
+                })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Left,
