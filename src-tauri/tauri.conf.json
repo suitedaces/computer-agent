@@ -36,6 +36,19 @@
         "visible": false,
         "skipTaskbar": true,
         "alwaysOnTop": true
+      },
+      {
+        "label": "spotlight",
+        "title": "taskhomie-spotlight",
+        "url": "index.html?spotlight=true",
+        "width": 800,
+        "height": 560,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true
       }
     ],
     "macOSPrivateApi": true,

@@ -56,6 +56,8 @@ static SCREEN_INFO: std::sync::OnceLock<ScreenInfo> = std::sync::OnceLock::new()
 static MAIN_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
 #[cfg(target_os = "macos")]
 static MINI_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
+#[cfg(target_os = "macos")]
+static SPOTLIGHT_PANEL: std::sync::OnceLock<tauri_nspanel::PanelHandle<tauri::Wry>> = std::sync::OnceLock::new();
 
 #[cfg(target_os = "macos")]
 fn get_screen_info() -> &'static ScreenInfo {
@@ -273,6 +275,48 @@ fn hide_main_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn show_spotlight_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // hide other windows
+        if let Some(mini_panel) = MINI_PANEL.get() {
+            mini_panel.hide();
+        }
+        if let Some(main_panel) = MAIN_PANEL.get() {
+            main_panel.hide();
+        }
+        // position and show spotlight centered
+        if let Some(panel) = SPOTLIGHT_PANEL.get() {
+            if let Some(window) = app_handle.get_webview_window("spotlight") {
+                position_window_center(&window, 800.0, 560.0);
+            }
+            panel.show_and_make_key();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(window) = app_handle.get_webview_window("spotlight") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_spotlight_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = SPOTLIGHT_PANEL.get() {
+        panel.hide();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = _app_handle.get_webview_window("spotlight") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
 // trigger screen flash effect - plays sound as feedback
 #[cfg(target_os = "macos")]
 fn trigger_screen_flash() {
@@ -288,6 +332,16 @@ fn trigger_screen_flash() {
 fn set_mini_click_through(ignore: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     if let Some(panel) = MINI_PANEL.get() {
+        panel.set_ignores_mouse_events(ignore);
+    }
+    Ok(())
+}
+
+// set main panel click-through (ignores mouse events)
+#[tauri::command]
+fn set_main_click_through(ignore: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = MAIN_PANEL.get() {
         panel.set_ignores_mouse_events(ignore);
     }
     Ok(())
@@ -377,16 +431,22 @@ fn main() {
         });
     });
 
+    let running_for_shortcut = running.clone();
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyH))
                 .unwrap()
-                .with_handler(|app, shortcut, event| {
-                    if event.state == ShortcutState::Pressed
-                        && shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyH)
-                    {
+                .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyS))
+                .unwrap()
+                .with_handler(move |app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+
+                    // Cmd+Shift+H - help mode (screenshot + prompt)
+                    if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyH) {
                         // capture screenshot first (before showing any UI)
                         let screenshot = match computer::ComputerControl::new() {
                             Ok(control) => control.take_screenshot().ok(),
@@ -412,6 +472,14 @@ fn main() {
                         #[cfg(not(target_os = "macos"))]
                         if let Some(window) = app.get_webview_window("mini") {
                             let _ = window.show();
+                        }
+                    }
+
+                    // Cmd+Shift+S - stop agent
+                    if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyS) {
+                        if running_for_shortcut.load(std::sync::atomic::Ordering::SeqCst) {
+                            running_for_shortcut.store(false, std::sync::atomic::Ordering::SeqCst);
+                            println!("[taskhomie] Stop requested via shortcut");
                         }
                     }
                 })
@@ -480,6 +548,35 @@ fn main() {
                         panel.set_hides_on_deactivate(false);
                         // cache for instant access
                         let _ = MINI_PANEL.set(panel);
+                    }
+                }
+
+                // spotlight panel
+                if let Some(window) = app.get_webview_window("spotlight") {
+                    // ensure spotlight window has ?spotlight=true in URL (for dev mode)
+                    if let Ok(url) = window.url() {
+                        if !url.to_string().contains("spotlight") {
+                            let new_url = format!("{}?spotlight=true", url);
+                            let _ = window.eval(&format!("window.location.href = '{}'", new_url));
+                        }
+                    }
+
+                    // position offscreen initially
+                    let _ = window.set_position(PhysicalPosition::new(-1000, -1000));
+
+                    if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
+                        panel.set_level(PanelLevel::Floating.value());
+                        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                        panel.set_collection_behavior(
+                            CollectionBehavior::new()
+                                .full_screen_auxiliary()
+                                .can_join_all_spaces()
+                                .stationary()
+                                .into(),
+                        );
+                        panel.set_hides_on_deactivate(false);
+                        // cache for instant access
+                        let _ = SPOTLIGHT_PANEL.set(panel);
                     }
                 }
             }
@@ -583,10 +680,13 @@ fn main() {
             hide_mini_window,
             show_main_window,
             hide_main_window,
+            show_spotlight_window,
+            hide_spotlight_window,
             minimize_to_mini,
             capture_screen_for_help,
             move_mini_to_corner,
             set_mini_click_through,
+            set_main_click_through,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

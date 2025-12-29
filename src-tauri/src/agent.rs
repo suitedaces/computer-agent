@@ -211,6 +211,8 @@ impl Agent {
                                     "text": thinking
                                 }));
                             }
+                            // also emit globally for mini window
+                            let _ = app_handle_clone.emit("agent:thinking_delta", serde_json::json!({ "delta": thinking }));
                         }
                         StreamEvent::TextDelta { text } => {
                             use tauri::Manager;
