@@ -383,6 +383,7 @@ Rules:
 - If something fails, try another approach
 - Always call a tool, never just text
 - Keep responses concise
+- Use `sleep N` in bash when waiting for pages, animations, or downloads to complete
 
 macOS CLI shortcuts (fast, use when applicable):
 - open -a "App" (launch), open file.pdf (default app), open https://url (browser)
