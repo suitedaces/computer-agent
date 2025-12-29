@@ -6,7 +6,9 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const BETA_HEADER: &str = "computer-use-2025-01-24";
+// computer-use-2025-01-24: enables computer_20250124 and bash_20250124 tools
+// interleaved-thinking-2025-05-14: enables extended thinking with tool use for Claude 4 models
+const BETA_HEADER: &str = "computer-use-2025-01-24,interleaved-thinking-2025-05-14";
 const API_VERSION: &str = "2023-06-01";
 
 /// display dimensions sent to claude for coordinate mapping.
@@ -18,8 +20,7 @@ const DISPLAY_HEIGHT: u32 = 800;
 /// while staying within typical rate limits
 const MAX_TOKENS: u32 = 16000;
 
-/// thinking budget for extended thinking. 5k is enough for reasoning through
-/// multi-step tasks without excessive latency
+/// thinking budget for extended thinking
 const THINKING_BUDGET: u32 = 5000;
 
 #[derive(Error, Debug)]
@@ -174,11 +175,15 @@ impl AnthropicClient {
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
         };
 
+        let tools = self.build_tools(mode);
+        println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
+        println!("[api] Tools JSON: {}", serde_json::to_string_pretty(&tools).unwrap_or_default());
+
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: MAX_TOKENS,
             system,
-            tools: self.build_tools(mode),
+            tools,
             messages,
             stream: true,
             thinking: ThinkingConfig {
@@ -353,14 +358,24 @@ impl AnthropicClient {
                                     }
                                 }
                                 "tool_use" => {
-                                    if index < current_tool_json.len() && !current_tool_json[index].is_empty() {
-                                        let (id, name) = if index < tool_info.len() {
-                                            tool_info[index].clone()
+                                    // tool_use may have empty input (e.g. take_snapshot with no args)
+                                    // so we check tool_info instead of current_tool_json
+                                    let (id, name) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    if !id.is_empty() {
+                                        let json_str = if index < current_tool_json.len() {
+                                            &current_tool_json[index]
                                         } else {
-                                            (String::new(), String::new())
+                                            ""
                                         };
-                                        let input: serde_json::Value = serde_json::from_str(&current_tool_json[index])
-                                            .unwrap_or(serde_json::json!({}));
+                                        let input: serde_json::Value = if json_str.is_empty() {
+                                            serde_json::json!({})
+                                        } else {
+                                            serde_json::from_str(json_str).unwrap_or(serde_json::json!({}))
+                                        };
                                         content_blocks.push(ContentBlock::ToolUse { id, name, input });
                                     }
                                 }
@@ -405,10 +420,12 @@ Use computer tool for:
 
 const BROWSER_SYSTEM_PROMPT: &str = r#"You are taskhomie in browser mode. You control the browser via Chrome DevTools Protocol.
 
-IMPORTANT: Always take_snapshot first to see the page structure. Use the uid from the snapshot to interact with elements.
+CRITICAL: You MUST use tools. Never respond with just text. Always call a tool.
 
-Tools:
-- take_snapshot: Get page accessibility tree with element uids. ALWAYS do this first.
+Your first action on any task: call take_snapshot to see the current page state.
+
+Available tools:
+- take_snapshot: Get page accessibility tree with element uids
 - click: Click element by uid
 - fill: Type text into input by uid
 - press_key: Press key combo (e.g. "Enter", "Control+A")
@@ -420,11 +437,11 @@ Tools:
 - hover: Hover over element by uid
 
 Rules:
-- ALWAYS take_snapshot before interacting with elements
-- Use uids from the LATEST snapshot only (stale uids will fail)
-- After navigation or clicks that change the page, take a new snapshot
-- Keep responses concise
-- Use bash for file operations, not browser"#;
+1. ALWAYS call take_snapshot first before any other action
+2. Use uids from the LATEST snapshot only (stale uids will fail)
+3. After navigation or clicks that change the page, take a new snapshot
+4. NEVER respond with just text - always call a tool
+5. Use bash for file operations, not browser"#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![

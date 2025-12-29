@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use chromiumoxide::browser::Browser;
+use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::accessibility::{
     AxNode, AxPropertyName, GetFullAxTreeParams,
 };
@@ -20,12 +20,12 @@ use chromiumoxide::Page;
 use futures::StreamExt;
 use tokio::sync::Mutex;
 
-// paths to check for DevToolsActivePort
+// paths to check for DevToolsActivePort (for connecting to existing chrome)
 const CHROME_PROFILES: &[&str] = &[
-    "Library/Application Support/Google/Chrome/Default",
-    "Library/Application Support/Google/Chrome Canary/Default",
-    "Library/Application Support/Arc/User Data/Default",
-    "Library/Application Support/Chromium/Default",
+    "Library/Application Support/Google/Chrome",
+    "Library/Application Support/Google/Chrome Canary",
+    "Library/Application Support/Arc/User Data",
+    "Library/Application Support/Chromium",
 ];
 
 pub struct BrowserClient {
@@ -40,24 +40,45 @@ pub struct BrowserClient {
 
 impl BrowserClient {
     pub async fn connect() -> Result<Self> {
-        let ws_url = find_chrome_ws_url().await?;
-        let (browser, handler) = Browser::connect(&ws_url)
-            .await
-            .context("failed to connect to chrome")?;
+        // try to connect to existing chrome first
+        if let Some(ws_url) = try_find_existing_chrome().await {
+            println!("[browser] Connecting to existing Chrome at {}", ws_url);
+            match Browser::connect(&ws_url).await {
+                Ok((browser, handler)) => {
+                    let handler_task = tokio::spawn(async move {
+                        handler_loop(handler).await;
+                    });
+
+                    let pages = browser.pages().await.unwrap_or_default();
+                    return Ok(Self {
+                        browser,
+                        _handler_task: handler_task,
+                        pages,
+                        selected_page_idx: 0,
+                        snapshot_id: 0,
+                        uid_to_backend_node: HashMap::new(),
+                    });
+                }
+                Err(e) => {
+                    println!("[browser] Failed to connect to existing Chrome: {}", e);
+                }
+            }
+        }
+
+        // no existing chrome, launch a new one using chromiumoxide
+        println!("[browser] Launching Chrome with user profile...");
+        let (browser, handler) = launch_chrome_with_profile().await?;
 
         let handler_task = tokio::spawn(async move {
             handler_loop(handler).await;
         });
 
-        // fetch existing pages
         let pages = browser.pages().await.unwrap_or_default();
-        let selected_page_idx = 0;
-
         Ok(Self {
             browser,
             _handler_task: handler_task,
             pages,
-            selected_page_idx,
+            selected_page_idx: 0,
             snapshot_id: 0,
             uid_to_backend_node: HashMap::new(),
         })
@@ -462,12 +483,13 @@ async fn handler_loop(mut handler: Handler) {
     }
 }
 
-// find chrome websocket url
-async fn find_chrome_ws_url() -> Result<String> {
+// try to find existing chrome with debugging enabled
+async fn try_find_existing_chrome() -> Option<String> {
     let home = std::env::var("HOME").unwrap_or_default();
 
+    // check DevToolsActivePort files in known profile locations
     for profile in CHROME_PROFILES {
-        let port_file = PathBuf::from(&home).join(profile).join("DevToolsActivePort");
+        let port_file = PathBuf::from(&home).join(profile).join("Default/DevToolsActivePort");
 
         if let Ok(content) = tokio::fs::read_to_string(&port_file).await {
             let lines: Vec<&str> = content.lines().collect();
@@ -475,24 +497,46 @@ async fn find_chrome_ws_url() -> Result<String> {
                 let port = lines[0].trim();
                 let path = lines[1].trim();
                 let ws_url = format!("ws://127.0.0.1:{port}{path}");
-                return Ok(ws_url);
+                return Some(ws_url);
             }
         }
     }
 
     // fallback: try localhost:9222
-    let fallback_url = "http://127.0.0.1:9222";
-    if reqwest::get(format!("{fallback_url}/json/version"))
+    if reqwest::get("http://127.0.0.1:9222/json/version")
         .await
         .is_ok()
     {
-        return Ok(fallback_url.to_string());
+        return Some("http://127.0.0.1:9222".to_string());
     }
 
-    Err(anyhow!(
-        "Could not find running Chrome with debugging enabled. \
-         Start Chrome with: open -a 'Google Chrome' --args --remote-debugging-port=9222"
-    ))
+    None
+}
+
+// launch chrome using chromiumoxide with dedicated debug profile
+async fn launch_chrome_with_profile() -> Result<(Browser, Handler)> {
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    // chrome requires a NON-DEFAULT user data dir for remote debugging
+    // using the default chrome profile path doesn't work - chrome treats it specially
+    // so we create a dedicated debug profile that's separate from the user's main profile
+    let user_data_dir = PathBuf::from(&home).join(".taskhomie-chrome");
+
+    println!("[browser] Using debug profile: {:?}", user_data_dir);
+
+    // disable_default_args() skips puppeteer automation flags that break normal browser usage
+    // (like --disable-extensions, --disable-sync, --enable-automation, etc.)
+    let config = BrowserConfig::builder()
+        .disable_default_args()
+        .with_head()
+        .user_data_dir(&user_data_dir)
+        .viewport(None)
+        .build()
+        .map_err(|e| anyhow!("failed to build browser config: {}", e))?;
+
+    Browser::launch(config)
+        .await
+        .context("failed to launch chrome")
 }
 
 // format a11y tree to text snapshot

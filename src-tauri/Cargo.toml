@@ -43,9 +43,6 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
-# mcp client (keeping for now, will remove later)
-rmcp = { version = "0.9", features = ["client", "transport-child-process"] }
-
 # browser automation via CDP
 chromiumoxide = { version = "0.8", features = ["tokio-runtime"] }
 futures = "0.3"

@@ -268,6 +268,17 @@ impl Agent {
 
             let mut tool_results: Vec<ContentBlock> = Vec::new();
 
+            // debug: print all block types received
+            let block_types: Vec<&str> = response_content.iter().map(|b| match b {
+                ContentBlock::Text { .. } => "text",
+                ContentBlock::Thinking { .. } => "thinking",
+                ContentBlock::ToolUse { name, .. } => name.as_str(),
+                ContentBlock::ToolResult { .. } => "tool_result",
+                ContentBlock::Image { .. } => "image",
+                ContentBlock::RedactedThinking { .. } => "redacted_thinking",
+            }).collect();
+            println!("[agent] Response blocks: {:?}", block_types);
+
             for block in &response_content {
                 if !self.running.load(Ordering::SeqCst) {
                     break;
@@ -277,7 +288,7 @@ impl Agent {
 
                 match block {
                     ContentBlock::Thinking { thinking, .. } => {
-                        println!("[agent] Thinking: {}...", &thinking[..thinking.len().min(100)]);
+                        println!("[agent] Thinking ({} chars): {}...", thinking.len(), &thinking[..thinking.len().min(300)]);
                         self.emit(&app_handle, "thinking", thinking, None, None);
                     }
 
