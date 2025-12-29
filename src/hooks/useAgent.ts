@@ -49,8 +49,6 @@ export function useAgent() {
           break;
 
         case "user_message":
-          // user message from backend (for cross-window sync)
-          console.log("[useAgent] user_message received, screenshot:", screenshot ? `${screenshot.length} chars` : "none");
           addMessage({ role: "user", content: message, screenshot });
           break;
 

@@ -132,9 +132,8 @@ async fn run_agent(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {} len: {})",
-        instructions, model, mode, history.len(), context_screenshot.is_some(),
-        context_screenshot.as_ref().map(|s| s.len()).unwrap_or(0));
+    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {})",
+        instructions, model, mode, history.len(), context_screenshot.is_some());
 
     let agent = state.agent.clone();
 
