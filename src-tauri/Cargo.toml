@@ -55,7 +55,8 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.
 core-graphics = "0.24"
 core-foundation = "0.10"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSScreen"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "warn"

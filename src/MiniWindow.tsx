@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MousePointer2,
@@ -56,10 +57,19 @@ export default function MiniWindow() {
     }
   }, [feed, streamingText]);
 
-  // poll running state
+  // poll running state and resize window accordingly
   useEffect(() => {
     const checkRunning = () => {
-      invoke<boolean>("is_agent_running").then(setIsRunning).catch(() => {});
+      invoke<boolean>("is_agent_running").then((running) => {
+        setIsRunning(running);
+        const win = getCurrentWindow();
+        if (running) {
+          win.setSize(new LogicalSize(300, 220));
+        } else {
+          // idle bar matches mini-feed width (280) but shorter height
+          win.setSize(new LogicalSize(280, 36));
+        }
+      }).catch(() => {});
     };
     checkRunning();
     const interval = setInterval(checkRunning, 500);
@@ -179,20 +189,15 @@ export default function MiniWindow() {
 
   if (!isRunning) {
     return (
-      <div className="h-screen w-screen flex items-start justify-start p-2">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9, y: -10 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          onClick={handleOpenMain}
-          className="mini-feed cursor-pointer hover:border-white/20 transition-colors"
-          style={{ maxHeight: 'auto' }}
-        >
-          <div className="flex items-center gap-2 px-3 py-2.5">
-            <span className="w-2 h-2 rounded-full bg-white/30" />
-            <span className="text-[10px] text-white/40">idle</span>
-          </div>
-        </motion.div>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        onClick={handleOpenMain}
+        className="h-screen w-screen bg-black/85 backdrop-blur-xl rounded-lg border border-white/10 flex items-center gap-2 px-3 cursor-pointer hover:border-white/20 transition-colors"
+      >
+        <span className="w-2 h-2 rounded-full bg-white/30" />
+        <span className="text-[10px] text-white/40">idle</span>
+      </motion.div>
     );
   }
 

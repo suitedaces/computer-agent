@@ -16,7 +16,9 @@ import {
   ChevronUp,
   Brain,
   Clock,
+  Minus,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
   const [expanded, setExpanded] = useState(true);
@@ -367,6 +369,13 @@ export default function App() {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => invoke("show_mini_window").then(() => invoke("hide_main_window"))}
+            className="w-6 h-6 flex items-center justify-center rounded-md text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+            title="Collapse"
+          >
+            <Minus size={12} />
+          </button>
         </div>
       </div>
 

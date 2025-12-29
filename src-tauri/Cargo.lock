@@ -5131,6 +5131,7 @@ dependencies = [
  "mimalloc",
  "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "reqwest",
  "rmcp",
  "serde",
