@@ -348,9 +348,39 @@ impl Agent {
 
                             match result {
                                 Ok(_action_result) => {
-                                    // take screenshot excluding app windows
-                                    // must run on main thread for Panel access on macOS
-                                    let screenshot = {
+                                    // zoom action returns screenshot directly, others need post-screenshot
+                                    let screenshot = if action.action == "zoom" {
+                                        // zoom returns the region screenshot, use panel exclusion
+                                        if let Some(region) = action.region {
+                                            #[cfg(target_os = "macos")]
+                                            {
+                                                crate::panels::take_screenshot_region_excluding_app(region)
+                                                    .map_err(|e| AgentError::Computer(ComputerError::Screenshot(e)))?
+                                            }
+                                            #[cfg(not(target_os = "macos"))]
+                                            {
+                                                action_result.unwrap_or_else(|| {
+                                                    let computer = ComputerControl::with_dimensions(screen_w, screen_h);
+                                                    computer.take_screenshot_region(region).unwrap_or_default()
+                                                })
+                                            }
+                                        } else {
+                                            // no region, fallback to full screenshot
+                                            #[cfg(target_os = "macos")]
+                                            {
+                                                crate::panels::take_screenshot_excluding_app()
+                                                    .map_err(|e| AgentError::Computer(ComputerError::Screenshot(e)))?
+                                            }
+                                            #[cfg(not(target_os = "macos"))]
+                                            {
+                                                let computer_guard = self.computer.lock().await;
+                                                let computer = computer_guard.as_ref().unwrap();
+                                                computer.take_screenshot()?
+                                            }
+                                        }
+                                    } else {
+                                        // take screenshot excluding app windows
+                                        // must run on main thread for Panel access on macOS
                                         #[cfg(target_os = "macos")]
                                         {
                                             crate::panels::take_screenshot_excluding_app()
@@ -624,6 +654,43 @@ fn format_action(action: &ComputerAction) -> String {
             format!("Scrolling {}", dir)
         }
         "wait" => "Waiting".to_string(),
+        "left_mouse_down" => {
+            if let Some(coord) = action.coordinate {
+                format!("Mouse down at ({}, {})", coord[0], coord[1])
+            } else {
+                "Mouse down".to_string()
+            }
+        }
+        "left_mouse_up" => {
+            if let Some(coord) = action.coordinate {
+                format!("Mouse up at ({}, {})", coord[0], coord[1])
+            } else {
+                "Mouse up".to_string()
+            }
+        }
+        "hold_key" => {
+            if let Some(key) = &action.key {
+                format!("Holding key: {}", key)
+            } else {
+                "Hold key".to_string()
+            }
+        }
+        "zoom" => {
+            if let Some(region) = action.region {
+                format!("Zooming region ({}, {}) to ({}, {})", region[0], region[1], region[2], region[3])
+            } else {
+                "Zooming".to_string()
+            }
+        }
+        "middle_click" => "Middle click".to_string(),
+        "triple_click" => "Triple click".to_string(),
+        "left_click_drag" => {
+            if let (Some(start), Some(end)) = (&action.start_coordinate, &action.coordinate) {
+                format!("Dragging from ({}, {}) to ({}, {})", start[0], start[1], end[0], end[1])
+            } else {
+                "Dragging".to_string()
+            }
+        }
         _ => format!("Action: {}", action.action),
     }
 }

@@ -50,6 +50,10 @@ pub struct ComputerAction {
     pub scroll_direction: Option<String>,
     #[serde(default)]
     pub scroll_amount: Option<i32>,
+    #[serde(default)]
+    pub key: Option<String>,  // for hold_key action
+    #[serde(default)]
+    pub region: Option<[i32; 4]>,  // for zoom action [x1, y1, x2, y2]
 }
 
 pub struct ComputerControl {
@@ -321,6 +325,57 @@ impl ComputerControl {
                 Ok(None)
             }
 
+            "left_mouse_down" => {
+                if let Some(coord) = action.coordinate {
+                    let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
+                    enigo.move_mouse(x, y, Coordinate::Abs)
+                        .map_err(|e| ComputerError::Input(e.to_string()))?;
+                }
+                enigo.button(Button::Left, Direction::Press)
+                    .map_err(|e| ComputerError::Input(e.to_string()))?;
+                Ok(None)
+            }
+
+            "left_mouse_up" => {
+                if let Some(coord) = action.coordinate {
+                    let (x, y) = self.map_from_ai_space(coord[0], coord[1]);
+                    enigo.move_mouse(x, y, Coordinate::Abs)
+                        .map_err(|e| ComputerError::Input(e.to_string()))?;
+                }
+                enigo.button(Button::Left, Direction::Release)
+                    .map_err(|e| ComputerError::Input(e.to_string()))?;
+                Ok(None)
+            }
+
+            "hold_key" => {
+                // hold_key holds a modifier key while performing the action in 'text' field
+                // e.g. hold shift while clicking
+                if let Some(key_str) = &action.key {
+                    #[cfg(target_os = "macos")]
+                    {
+                        self.hold_key_cgevent(key_str)?;
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        self.hold_key_enigo(&mut enigo, key_str)?;
+                    }
+                }
+                Ok(None)
+            }
+
+            "zoom" => {
+                // zoom captures a region at full resolution (no downscaling)
+                // region is [x1, y1, x2, y2] in AI space
+                if let Some(region) = action.region {
+                    let screenshot = self.take_screenshot_region(region)?;
+                    Ok(Some(screenshot))
+                } else {
+                    // fallback to full screenshot if no region specified
+                    let screenshot = self.take_screenshot()?;
+                    Ok(Some(screenshot))
+                }
+            }
+
             _ => Err(ComputerError::UnknownAction(action.action.clone())),
         }
     }
@@ -427,6 +482,150 @@ impl ComputerControl {
             key_up.set_flags(flags);
         }
         key_up.post(CGEventTapLocation::HID);
+
+        Ok(())
+    }
+
+    /// take a screenshot of a specific region at full resolution (for zoom action)
+    /// uses same exclusion logic as take_screenshot_excluding
+    #[cfg(target_os = "macos")]
+    pub fn take_screenshot_region_excluding(&self, region: [i32; 4], window_id: u32) -> Result<String, ComputerError> {
+        use core_graphics::window::{
+            kCGWindowListOptionOnScreenBelowWindow, kCGWindowListExcludeDesktopElements,
+            CGWindowListCreateImage,
+        };
+
+        // region is [x1, y1, x2, y2] in AI space, convert to screen space
+        let (x1, y1) = self.map_from_ai_space(region[0], region[1]);
+        let (x2, y2) = self.map_from_ai_space(region[2], region[3]);
+
+        let width = (x2 - x1).unsigned_abs();
+        let height = (y2 - y1).unsigned_abs();
+
+        let bounds = CGRect::new(
+            &CGPoint::new(x1 as f64, y1 as f64),
+            &CGSize::new(width as f64, height as f64),
+        );
+
+        // same exclusion logic as take_screenshot_excluding
+        let options = kCGWindowListOptionOnScreenBelowWindow | kCGWindowListExcludeDesktopElements;
+
+        let cg_image = unsafe {
+            let img_ptr = CGWindowListCreateImage(
+                bounds,
+                options,
+                window_id,
+                kCGWindowImageDefault,
+            );
+            if img_ptr.is_null() {
+                return Err(ComputerError::Screenshot("failed to capture region".to_string()));
+            }
+            core_graphics::image::CGImage::from_ptr(img_ptr)
+        };
+
+        let img_width = cg_image.width();
+        let img_height = cg_image.height();
+        let bytes_per_row = cg_image.bytes_per_row();
+        let data = cg_image.data();
+        let raw_data = data.bytes();
+
+        // BGRA -> RGB
+        let mut rgb_data = Vec::with_capacity((img_width * img_height * 3) as usize);
+        for y in 0..img_height {
+            let row_start = (y * bytes_per_row) as usize;
+            for x in 0..img_width {
+                let offset = row_start + (x * 4) as usize;
+                rgb_data.push(raw_data[offset + 2]); // R
+                rgb_data.push(raw_data[offset + 1]); // G
+                rgb_data.push(raw_data[offset]);     // B
+            }
+        }
+
+        let img = image::RgbImage::from_raw(img_width as u32, img_height as u32, rgb_data)
+            .ok_or_else(|| ComputerError::Screenshot("failed to create image".to_string()))?;
+
+        // zoom returns full resolution, no resize
+        let mut buffer = Vec::with_capacity(200_000);
+        let mut encoder = JpegEncoder::new_with_quality(&mut buffer, JPEG_QUALITY);
+        encoder.encode_image(&img)
+            .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
+
+        Ok(BASE64.encode(&buffer))
+    }
+
+    /// fallback zoom without exclusion (for non-macos or when window_id unavailable)
+    pub fn take_screenshot_region(&self, region: [i32; 4]) -> Result<String, ComputerError> {
+        // region is [x1, y1, x2, y2] in AI space, convert to screen space
+        let (x1, y1) = self.map_from_ai_space(region[0], region[1]);
+        let (x2, y2) = self.map_from_ai_space(region[2], region[3]);
+
+        let width = (x2 - x1).unsigned_abs();
+        let height = (y2 - y1).unsigned_abs();
+
+        let monitor = Monitor::all()
+            .map_err(|e| ComputerError::Screenshot(e.to_string()))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ComputerError::Screenshot("no monitor found".to_string()))?;
+
+        let image = monitor
+            .capture_image()
+            .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
+
+        let cropped = DynamicImage::ImageRgba8(image)
+            .crop_imm(x1 as u32, y1 as u32, width, height);
+
+        let rgb = cropped.to_rgb8();
+        let mut buffer = Vec::with_capacity(200_000);
+        let mut encoder = JpegEncoder::new_with_quality(&mut buffer, JPEG_QUALITY);
+        encoder.encode_image(&rgb)
+            .map_err(|e| ComputerError::Screenshot(e.to_string()))?;
+
+        Ok(BASE64.encode(&buffer))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn hold_key_cgevent(&self, key_str: &str) -> Result<(), ComputerError> {
+        // hold_key just presses the key down without releasing
+        // the key will be released by a subsequent action or timeout
+        let key_lower = key_str.to_lowercase();
+
+        let flags = match key_lower.as_str() {
+            "cmd" | "command" | "super" | "meta" => CGEventFlags::CGEventFlagCommand,
+            "ctrl" | "control" => CGEventFlags::CGEventFlagControl,
+            "alt" | "option" => CGEventFlags::CGEventFlagAlternate,
+            "shift" => CGEventFlags::CGEventFlagShift,
+            _ => return Err(ComputerError::Input(format!("unknown modifier key: {}", key_str))),
+        };
+
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .map_err(|_| ComputerError::Input("failed to create event source".to_string()))?;
+
+        // create a null key event with just the modifier flag set
+        // this simulates holding the modifier key
+        let key_down = CGEvent::new_keyboard_event(source, 0, true)
+            .map_err(|_| ComputerError::Input("failed to create key event".to_string()))?;
+        key_down.set_flags(flags);
+        key_down.post(CGEventTapLocation::HID);
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn hold_key_enigo(&self, enigo: &mut Enigo, key_str: &str) -> Result<(), ComputerError> {
+        use enigo::Key;
+
+        let key_lower = key_str.to_lowercase();
+        let key = match key_lower.as_str() {
+            "cmd" | "command" | "super" | "meta" => Key::Meta,
+            "ctrl" | "control" => Key::Control,
+            "alt" | "option" => Key::Alt,
+            "shift" => Key::Shift,
+            _ => return Err(ComputerError::Input(format!("unknown modifier key: {}", key_str))),
+        };
+
+        enigo.key(key, Direction::Press)
+            .map_err(|e| ComputerError::Input(e.to_string()))?;
 
         Ok(())
     }
