@@ -49,6 +49,9 @@ rmcp = { version = "0.9", features = ["client", "transport-child-process"] }
 # allocator
 mimalloc = "0.1"
 
+# global hotkey
+tauri-plugin-global-shortcut = "2"
+
 # macos panel support
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }

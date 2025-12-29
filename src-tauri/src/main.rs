@@ -15,7 +15,8 @@ use agent::{Agent, AgentMode, HistoryMessage};
 use mcp::{create_shared_client, SharedMcpClient};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{tray::TrayIconBuilder, Manager, PhysicalPosition, State};
+use tauri::{tray::TrayIconBuilder, Emitter, Manager, PhysicalPosition, State};
+use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 #[cfg(target_os = "macos")]
 use tauri_nspanel::{
@@ -262,6 +263,13 @@ fn hide_main_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 // single command to minimize main -> mini (uses cached handles, no mutex lock)
+// hotkey triggered - capture screenshot and return base64
+#[tauri::command]
+fn capture_screen_for_help() -> Result<String, String> {
+    let control = computer::ComputerControl::new().map_err(|e| e.to_string())?;
+    control.take_screenshot().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn minimize_to_mini(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -322,7 +330,35 @@ fn main() {
     });
 
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init());
+        .plugin(tauri_plugin_shell::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyH))
+                .unwrap()
+                .with_handler(|app, shortcut, event| {
+                    if event.state == ShortcutState::Pressed
+                        && shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyH)
+                    {
+                        // emit event to frontend - it will capture screenshot and show UI
+                        let _ = app.emit("hotkey-help", ());
+
+                        // show mini window expanded
+                        #[cfg(target_os = "macos")]
+                        if let Some(panel) = MINI_PANEL.get() {
+                            if let Some(window) = app.get_webview_window("mini") {
+                                let _ = window.set_size(tauri::LogicalSize::new(300.0, 220.0));
+                                position_window_top_right(&window, 300.0, 220.0);
+                            }
+                            panel.show();
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        if let Some(window) = app.get_webview_window("mini") {
+                            let _ = window.show();
+                        }
+                    }
+                })
+                .build(),
+        );
 
     #[cfg(target_os = "macos")]
     {
@@ -490,6 +526,7 @@ fn main() {
             show_main_window,
             hide_main_window,
             minimize_to_mini,
+            capture_screen_for_help,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

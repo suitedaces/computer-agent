@@ -13,6 +13,8 @@ import {
   Clock,
   Square,
   ChevronRight,
+  Send,
+  X,
 } from "lucide-react";
 
 interface FeedItem {
@@ -49,7 +51,11 @@ export default function MiniWindow() {
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [helpMode, setHelpMode] = useState(false);
+  const [helpPrompt, setHelpPrompt] = useState("Help me out here: ");
+  const [helpScreenshot, setHelpScreenshot] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // auto-scroll
   useEffect(() => {
@@ -169,6 +175,21 @@ export default function MiniWindow() {
       invoke("hide_mini_window").catch(() => {});
     });
 
+    // hotkey help mode - Cmd+Shift+H triggers this
+    const unlisten8 = listen("hotkey-help", async () => {
+      console.log("[mini] hotkey-help received");
+      try {
+        const screenshot = await invoke<string>("capture_screen_for_help");
+        setHelpScreenshot(screenshot);
+        setHelpMode(true);
+        setHelpPrompt("Help me out here: ");
+        // focus input after render
+        setTimeout(() => inputRef.current?.focus(), 50);
+      } catch (e) {
+        console.error("[mini] screenshot failed:", e);
+      }
+    });
+
     return () => {
       unlisten1.then((f) => f());
       unlisten2.then((f) => f());
@@ -177,6 +198,7 @@ export default function MiniWindow() {
       unlisten5.then((f) => f());
       unlisten6.then((f) => f());
       unlisten7.then((f) => f());
+      unlisten8.then((f) => f());
     };
   }, []);
 
@@ -187,6 +209,92 @@ export default function MiniWindow() {
       console.error(e);
     }
   };
+
+  const handleHelpSubmit = async () => {
+    if (!helpPrompt.trim() || !helpScreenshot) return;
+    try {
+      // run agent with screenshot context
+      await invoke("run_agent", {
+        instructions: helpPrompt,
+        model: "claude-sonnet-4-5",
+        mode: "computer",
+        history: [{
+          role: "user",
+          content: [
+            { type: "text", text: helpPrompt },
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: helpScreenshot } }
+          ]
+        }]
+      });
+      setHelpMode(false);
+      setHelpScreenshot(null);
+    } catch (e) {
+      console.error("[mini] help submit failed:", e);
+    }
+  };
+
+  const handleHelpCancel = () => {
+    setHelpMode(false);
+    setHelpScreenshot(null);
+    setHelpPrompt("Help me out here: ");
+    invoke("hide_mini_window").catch(() => {});
+  };
+
+  // help mode UI - shows when hotkey triggered
+  if (helpMode && !isRunning) {
+    return (
+      <div className="h-screen w-screen flex items-start justify-start p-2">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="mini-feed"
+        >
+          {/* screenshot preview */}
+          {helpScreenshot && (
+            <div className="px-2 pt-2">
+              <img
+                src={`data:image/jpeg;base64,${helpScreenshot}`}
+                alt="Screenshot"
+                className="w-full h-20 object-cover rounded-md border border-white/10"
+              />
+            </div>
+          )}
+
+          {/* prompt input */}
+          <div className="flex-1 px-2 py-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={helpPrompt}
+              onChange={(e) => setHelpPrompt(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleHelpSubmit()}
+              placeholder="Help me out here..."
+              className="w-full bg-white/5 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-white/90 placeholder:text-white/30 focus:outline-none focus:border-white/20"
+              autoFocus
+            />
+          </div>
+
+          {/* action buttons */}
+          <div className="shrink-0 px-2 pb-2 flex gap-2">
+            <button
+              onClick={handleHelpCancel}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 transition-colors text-[10px]"
+            >
+              <X size={10} />
+              <span>Cancel</span>
+            </button>
+            <button
+              onClick={handleHelpSubmit}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md bg-blue-500/20 border border-blue-400/20 text-blue-300 hover:bg-blue-500/30 transition-colors text-[10px]"
+            >
+              <Send size={10} />
+              <span>Send</span>
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   if (!isRunning) {
     return (
