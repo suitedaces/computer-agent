@@ -33,7 +33,7 @@ export function useAgent() {
 
     const unlistenPromise = listen<AgentUpdate>("agent-update", (event) => {
       invoke("debug_log", { message: `Event received: ${event.payload.update_type}` });
-      const { update_type, message, action, screenshot, exit_code } = event.payload;
+      const { update_type, message, action, screenshot, exit_code, mode } = event.payload;
 
       switch (update_type) {
         case "started":
@@ -42,7 +42,10 @@ export function useAgent() {
           invoke("set_main_click_through", { ignore: true }).catch(() => {});
           invoke("set_mini_click_through", { ignore: true }).catch(() => {});
           invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
-          invoke("show_border_overlay").catch(() => {});
+          // only show border overlay in computer mode
+          if (mode === "computer") {
+            invoke("show_border_overlay").catch(() => {});
+          }
           break;
 
         case "user_message":

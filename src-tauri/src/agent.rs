@@ -47,6 +47,8 @@ pub struct AgentUpdate {
     pub bash_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,8 +147,12 @@ impl Agent {
         let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
 
-        // emit started to all windows
-        self.emit(&app_handle, "started", "Agent started", None, None);
+        // emit started to all windows with mode
+        let mode_str = match mode {
+            AgentMode::Computer => "computer",
+            AgentMode::Browser => "browser",
+        };
+        self.emit_full(&app_handle, "started", "Agent started", None, None, None, Some(mode_str.to_string()));
         let _ = app_handle.emit("agent:started", ());
 
         // emit border show for frontend to call IPC command
@@ -160,6 +166,7 @@ impl Agent {
             screenshot: context_screenshot.clone(),
             bash_command: None,
             exit_code: None,
+            mode: None,
         });
         println!("[agent] Emitted started + user_message events");
 
@@ -559,6 +566,19 @@ impl Agent {
         screenshot: Option<String>,
         exit_code: Option<i32>,
     ) {
+        self.emit_full(app_handle, update_type, message, action, screenshot, exit_code, None);
+    }
+
+    fn emit_full(
+        &self,
+        app_handle: &AppHandle,
+        update_type: &str,
+        message: &str,
+        action: Option<serde_json::Value>,
+        screenshot: Option<String>,
+        exit_code: Option<i32>,
+        mode: Option<String>,
+    ) {
         let payload = AgentUpdate {
             update_type: update_type.to_string(),
             message: message.to_string(),
@@ -566,6 +586,7 @@ impl Agent {
             screenshot,
             bash_command: None,
             exit_code,
+            mode,
         };
         // emit globally so both main and spotlight windows receive events
         match app_handle.emit("agent-update", payload) {
