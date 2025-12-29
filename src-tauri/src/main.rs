@@ -213,11 +213,10 @@ async fn get_mcp_tools(state: State<'_, AppState>) -> Result<Vec<String>, String
 fn show_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     if let Some(panel) = MINI_PANEL.get() {
-        if !panel.is_visible() {
-            if let Some(window) = app_handle.get_webview_window("mini") {
-                let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
-                position_window_top_right(&window, 280.0, 36.0);
-            }
+        // always resize to idle bar (needed when returning from help mode)
+        if let Some(window) = app_handle.get_webview_window("mini") {
+            let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
+            position_window_top_right(&window, 280.0, 36.0);
         }
         panel.show();
     }
@@ -493,10 +492,7 @@ fn main() {
                         #[cfg(target_os = "macos")]
                         trigger_screen_flash();
 
-                        // emit screenshot to frontend
-                        let _ = app.emit("hotkey-help", serde_json::json!({ "screenshot": screenshot }));
-
-                        // show window sized and centered for help UI
+                        // resize window BEFORE emitting to frontend
                         #[cfg(target_os = "macos")]
                         if let Some(panel) = MINI_PANEL.get() {
                             if let Some(window) = app.get_webview_window("mini") {
@@ -509,6 +505,9 @@ fn main() {
                         if let Some(window) = app.get_webview_window("mini") {
                             let _ = window.show();
                         }
+
+                        // emit after window is ready
+                        let _ = app.emit("hotkey-help", serde_json::json!({ "screenshot": screenshot }));
                     }
 
                     // Cmd+Shift+S - stop agent

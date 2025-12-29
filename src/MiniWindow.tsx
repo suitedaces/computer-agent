@@ -17,14 +17,17 @@ export default function MiniWindow() {
 
   // poll running state and resize window
   useEffect(() => {
+    // don't poll/resize while in help mode - backend handles help mode sizing
+    if (helpMode) return;
+
     const checkRunning = () => {
       invoke<boolean>("is_agent_running").then((running) => {
         setIsRunning(running);
         const win = getCurrentWindow();
-        if (!helpMode && !running) {
+        if (!running) {
           // idle bar size
           win.setSize(new LogicalSize(280, 36));
-        } else if (running && !helpMode) {
+        } else {
           // running feed size
           win.setSize(new LogicalSize(380, 320));
         }
@@ -99,9 +102,7 @@ export default function MiniWindow() {
     setHelpMode(false);
     setHelpScreenshot(null);
     setHelpPrompt("");
-    // resize back to idle bar
-    const win = getCurrentWindow();
-    await win.setSize(new LogicalSize(280, 36));
+    // show_mini_window handles resize + reposition to top right
     await invoke("show_mini_window");
   };
 
