@@ -124,9 +124,9 @@ export function useAgent() {
     const text = (overrideText ?? inputText).trim();
     if (!text || isRunning) return;
 
-    // build history from past messages (user + assistant text only)
+    // build history from past messages (user + assistant responses)
     const history = messages
-      .filter(m => m.role === "user" || (m.role === "assistant" && m.type === "thinking"))
+      .filter(m => m.role === "user" || (m.role === "assistant" && (m.type === "thinking" || m.type === "info")))
       .map(m => ({ role: m.role, content: m.content }));
 
     // clear input before invoking (user message comes from backend via user_message event)
@@ -135,6 +135,8 @@ export function useAgent() {
     try {
       await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, context_screenshot: contextScreenshot ?? null });
     } catch (error) {
+      // on early failure, show the user message so they know what failed
+      addMessage({ role: "user", content: text });
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
