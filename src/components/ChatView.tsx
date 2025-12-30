@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Streamdown } from "streamdown";
 import { useAgentStore } from "../stores/agentStore";
 import { useAgent } from "../hooks/useAgent";
-import { ChatMessage, ModelId } from "../types";
+import { ChatMessage, ConversationMeta, Conversation, ModelId, AgentMode } from "../types";
 import {
   Send,
   Square,
@@ -19,6 +19,10 @@ import {
   X,
   Maximize2,
   Minimize2,
+  Monitor,
+  Plus,
+  MessageSquare,
+  Trash2,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -252,9 +256,234 @@ const MODELS: { id: ModelId; label: string }[] = [
   { id: "claude-opus-4-5", label: "Opus 4.5" },
 ];
 
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now() / 1000;
+  const diff = now - timestamp;
+  if (diff < 60) return "now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d`;
+  return new Date(timestamp * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// convert anthropic api messages to chat messages for display
+function convertApiToChat(conversation: Conversation): ChatMessage[] {
+  const chatMessages: ChatMessage[] = [];
+
+  for (const msg of conversation.messages) {
+    // find first text block for main content
+    let mainText = "";
+    let screenshot: string | undefined;
+
+    for (const block of msg.content) {
+      if (block.type === "text" && block.text) {
+        mainText = block.text;
+        break;
+      }
+      if (block.type === "image" && block.source?.data) {
+        screenshot = block.source.data;
+      }
+    }
+
+    if (msg.role === "user") {
+      chatMessages.push({
+        id: crypto.randomUUID(),
+        role: "user",
+        content: mainText,
+        timestamp: new Date(conversation.updated_at * 1000),
+        screenshot,
+      });
+    } else {
+      // assistant messages - extract text, thinking, tool uses
+      for (const block of msg.content) {
+        if (block.type === "thinking" && block.thinking) {
+          chatMessages.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: block.thinking,
+            timestamp: new Date(conversation.updated_at * 1000),
+            type: "thinking",
+          });
+        } else if (block.type === "text" && block.text) {
+          chatMessages.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: block.text,
+            timestamp: new Date(conversation.updated_at * 1000),
+          });
+        } else if (block.type === "tool_use" && block.name) {
+          const input = block.input as Record<string, unknown> | undefined;
+          if (block.name === "bash" && input?.command) {
+            chatMessages.push({
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: String(input.command),
+              timestamp: new Date(conversation.updated_at * 1000),
+              type: "bash",
+              pending: false,
+            });
+          } else if (block.name === "computer" && input?.action) {
+            chatMessages.push({
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: `${input.action}`,
+              timestamp: new Date(conversation.updated_at * 1000),
+              type: "action",
+              action: input as unknown as ChatMessage["action"],
+              pending: false,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return chatMessages;
+}
+
+interface HistoryDropdownProps {
+  onNewChat: () => void;
+  onLoad: (messages: ChatMessage[], model: ModelId, mode: AgentMode) => void;
+  disabled?: boolean;
+}
+
+function HistoryDropdown({ onNewChat, onLoad, disabled }: HistoryDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const [conversations, setConversations] = useState<ConversationMeta[]>([]);
+  const [loading, setLoading] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setLoading(true);
+      invoke<ConversationMeta[]>("list_conversations", { limit: 20, offset: 0 })
+        .then(setConversations)
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    if (open) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    await invoke("delete_conversation", { id });
+    setConversations(prev => prev.filter(c => c.id !== id));
+  };
+
+  const handleLoad = async (id: string) => {
+    try {
+      const conv = await invoke<Conversation | null>("load_conversation", { id });
+      if (conv) {
+        const chatMessages = convertApiToChat(conv);
+        const model = conv.model as ModelId;
+        const mode = conv.mode as AgentMode;
+        onLoad(chatMessages, model, mode);
+      }
+    } catch (e) {
+      console.error("Failed to load conversation:", e);
+    }
+    setOpen(false);
+  };
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      <button
+        onClick={() => !disabled && setOpen(!open)}
+        disabled={disabled}
+        className={`flex items-center gap-1.5 text-[11px] font-medium tracking-wide uppercase transition-colors ${
+          disabled ? "text-white/20 cursor-not-allowed" : "text-white/40 hover:text-white/70"
+        }`}
+      >
+        <span>taskhomie</span>
+        <ChevronDown size={10} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.96 }}
+            transition={{ duration: 0.12 }}
+            className="absolute top-full left-0 mt-2 w-64 z-50 rounded-lg overflow-hidden"
+            style={{
+              background: "rgba(0, 0, 0, 0.92)",
+              backdropFilter: "blur(24px) saturate(180%)",
+              border: "1px solid rgba(255, 255, 255, 0.12)",
+              boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08)",
+            }}
+          >
+            {/* new chat button */}
+            <button
+              onClick={() => { onNewChat(); setOpen(false); }}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-[11px] text-white/70 hover:bg-white/8 transition-colors border-b border-white/8"
+            >
+              <Plus size={12} className="text-blue-400" />
+              <span>New conversation</span>
+            </button>
+
+            {/* conversation list */}
+            <div className="max-h-[280px] overflow-y-auto">
+              {loading ? (
+                <div className="px-3 py-4 text-[10px] text-white/30 text-center">Loading...</div>
+              ) : conversations.length === 0 ? (
+                <div className="px-3 py-4 text-[10px] text-white/30 text-center">No conversations yet</div>
+              ) : (
+                conversations.map((conv, i) => (
+                  <motion.div
+                    key={conv.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.02 }}
+                    className="group flex items-center gap-2 px-3 py-2 hover:bg-white/6 transition-colors cursor-pointer"
+                    onClick={() => handleLoad(conv.id)}
+                  >
+                    <MessageSquare size={11} className="text-white/25 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-white/80 truncate">{conv.title || "Untitled"}</p>
+                      <p className="text-[9px] text-white/30">{formatRelativeTime(conv.updated_at)} · {conv.message_count} msgs</p>
+                    </div>
+                    <button
+                      onClick={(e) => handleDelete(e, conv.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 transition-all"
+                    >
+                      <Trash2 size={10} className="text-red-400/70" />
+                    </button>
+                  </motion.div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function ThinkingBubble() {
   const { streamingThinking, isRunning } = useAgentStore();
   const [expanded, setExpanded] = useState(false);
+  const thinkingScrollRef = useRef<HTMLDivElement>(null);
+
+  // auto-scroll thinking content to bottom
+  useEffect(() => {
+    if (!streamingThinking || !isRunning) return;
+    const frame = requestAnimationFrame(() => {
+      if (thinkingScrollRef.current) {
+        thinkingScrollRef.current.scrollTop = thinkingScrollRef.current.scrollHeight;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [streamingThinking, isRunning]);
 
   if (!streamingThinking) return null;
 
@@ -276,7 +505,10 @@ function ThinkingBubble() {
             {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
           </span>
         </button>
-        <div className={`text-[11px] leading-relaxed text-white/50 overflow-hidden transition-all ${expanded ? "max-h-[300px]" : "max-h-[60px]"} overflow-y-auto`}>
+        <div
+          ref={thinkingScrollRef}
+          className={`text-[11px] leading-relaxed text-white/50 overflow-hidden transition-all ${expanded ? "max-h-[300px]" : "max-h-[60px]"} overflow-y-auto`}
+        >
           <Streamdown isAnimating={isRunning}>{streamingThinking}</Streamdown>
         </div>
       </div>
@@ -305,7 +537,7 @@ function StreamingBubble() {
 }
 
 export default function ChatView({ variant }: ChatViewProps) {
-  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages } = useAgentStore();
   const { submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -378,35 +610,30 @@ export default function ChatView({ variant }: ChatViewProps) {
       {/* titlebar - hidden for mini */}
       {!isMini && (
         <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
-          <span className="text-[11px] font-medium text-white/40 tracking-wide uppercase">
-            taskhomie
-          </span>
+          <HistoryDropdown
+              onNewChat={() => clearMessages()}
+              onLoad={(msgs, model, mode) => {
+                setMessages(msgs);
+                setSelectedModel(model);
+                setSelectedMode(mode);
+              }}
+              disabled={isRunning}
+            />
           <div className="flex items-center gap-2">
-            {/* mode toggle */}
-            <div className="flex rounded-md overflow-hidden border border-white/10">
-              <button
-                onClick={() => setSelectedMode("computer")}
-                disabled={isRunning}
-                className={`px-2 py-1 text-[10px] transition-colors ${
-                  selectedMode === "computer"
-                    ? "bg-white/15 text-white/90"
-                    : "text-white/40 hover:text-white/60"
-                } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                computer
-              </button>
-              <button
-                onClick={() => setSelectedMode("browser")}
-                disabled={isRunning}
-                className={`px-2 py-1 text-[10px] transition-colors ${
-                  selectedMode === "browser"
-                    ? "bg-white/15 text-white/90"
-                    : "text-white/40 hover:text-white/60"
-                } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                browser
-              </button>
-            </div>
+            {/* take over toggle - switches to computer mode */}
+            <button
+              onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
+              disabled={isRunning}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] transition-colors border ${
+                selectedMode === "computer"
+                  ? "bg-orange-500/20 border-orange-400/40 text-orange-300"
+                  : "bg-white/5 border-white/10 text-white/40 hover:text-white/60 hover:border-white/20"
+              } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+              title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
+            >
+              <Monitor size={12} />
+              <span>Take over</span>
+            </button>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value as ModelId)}

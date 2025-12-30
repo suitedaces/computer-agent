@@ -43,6 +43,11 @@ dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1"
 
+# storage
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "5"
+
 # browser automation via CDP
 chromiumoxide = { version = "0.8", features = ["tokio-runtime"] }
 futures = "0.3"

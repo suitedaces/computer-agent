@@ -11,6 +11,7 @@ mod bash;
 mod browser;
 mod computer;
 mod panels;
+mod storage;
 
 use agent::{Agent, AgentMode, HistoryMessage};
 use std::sync::Arc;
@@ -409,10 +410,51 @@ fn minimize_to_mini(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// --- storage IPC commands ---
+
+mod storage_cmd {
+    use crate::storage::{self, Conversation, ConversationMeta};
+
+    #[tauri::command]
+    pub fn list_conversations(limit: usize, offset: usize) -> Result<Vec<ConversationMeta>, String> {
+        storage::list_conversations(limit, offset)
+    }
+
+    #[tauri::command]
+    pub fn load_conversation(id: String) -> Result<Option<Conversation>, String> {
+        storage::load_conversation(&id)
+    }
+
+    #[tauri::command]
+    pub fn create_conversation(title: String, model: String, mode: String) -> Result<String, String> {
+        storage::create_conversation(title, model, mode)
+    }
+
+    #[tauri::command]
+    pub fn save_conversation(conv: Conversation) -> Result<(), String> {
+        storage::save_conversation(&conv)
+    }
+
+    #[tauri::command]
+    pub fn delete_conversation(id: String) -> Result<(), String> {
+        storage::delete_conversation(&id)
+    }
+
+    #[tauri::command]
+    pub fn search_conversations(query: String, limit: usize) -> Result<Vec<ConversationMeta>, String> {
+        storage::search_conversations(&query, limit)
+    }
+}
+
 fn main() {
     // load .env
     if dotenvy::dotenv().is_err() {
         let _ = dotenvy::from_filename("../.env");
+    }
+
+    // init storage
+    if let Err(e) = storage::init_db() {
+        eprintln!("[taskhomie] storage init failed: {}", e);
     }
 
     let running = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -732,6 +774,12 @@ fn main() {
             show_border_overlay,
             hide_border_overlay,
             take_screenshot_excluding_app,
+            storage_cmd::list_conversations,
+            storage_cmd::load_conversation,
+            storage_cmd::create_conversation,
+            storage_cmd::save_conversation,
+            storage_cmd::delete_conversation,
+            storage_cmd::search_conversations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

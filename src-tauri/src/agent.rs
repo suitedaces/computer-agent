@@ -1,4 +1,5 @@
 use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, StreamEvent, ToolResultContent};
+use crate::storage::{self, Conversation};
 use crate::bash::BashExecutor;
 use crate::browser::{BrowserClient, SharedBrowserClient};
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
@@ -162,14 +163,22 @@ impl Agent {
             }
         }
 
-        let client = AnthropicClient::new(api_key, model);
+        let client = AnthropicClient::new(api_key, model.clone());
         let mut messages: Vec<Message> = Vec::new();
 
-        // emit started to all windows with mode
+        // create conversation for storage
         let mode_str = match mode {
             AgentMode::Computer => "computer",
             AgentMode::Browser => "browser",
         };
+        let mut conversation = Conversation::new(
+            uuid::Uuid::new_v4().to_string(),
+            "New Conversation".to_string(),
+            model.clone(),
+            mode_str.to_string(),
+        );
+
+        // emit started to all windows with mode
         self.emit_full(&app_handle, "started", "Agent started", None, None, None, Some(mode_str.to_string()));
         let _ = app_handle.emit("agent:started", ());
 
@@ -218,10 +227,12 @@ impl Agent {
             text: instructions.clone(),
         });
 
-        messages.push(Message {
+        let user_message = Message {
             role: "user".to_string(),
             content: user_content,
-        });
+        };
+        messages.push(user_message.clone());
+        conversation.add_message(user_message);
 
         // agent loop - limit iterations to prevent runaway tasks.
         // 50 is enough for complex multi-step tasks while providing a safety bound
@@ -267,10 +278,10 @@ impl Agent {
                 }
             });
 
-            let response_content = match client.send_message_streaming(messages.clone(), event_tx, mode).await {
-                Ok(content) => {
-                    println!("[agent] API streaming response complete, {} blocks", content.len());
-                    content
+            let api_result = match client.send_message_streaming(messages.clone(), event_tx, mode).await {
+                Ok(result) => {
+                    println!("[agent] API streaming response complete, {} blocks, usage: {:?}", result.content.len(), result.usage);
+                    result
                 }
                 Err(e) => {
                     println!("[agent] API error: {:?}", e);
@@ -278,15 +289,19 @@ impl Agent {
                     break;
                 }
             };
+            let response_content = api_result.content;
 
             // wait for stream consumer to finish
             let _ = stream_task.await;
 
             // add assistant response to history
-            messages.push(Message {
+            let assistant_message = Message {
                 role: "assistant".to_string(),
                 content: response_content.clone(),
-            });
+            };
+            messages.push(assistant_message.clone());
+            conversation.add_message(assistant_message);
+            conversation.add_usage(api_result.usage.clone(), &model);
 
             let mut tool_results: Vec<ContentBlock> = Vec::new();
 
@@ -507,7 +522,7 @@ impl Agent {
                             self.emit(
                                 &app_handle,
                                 "action",
-                                &format!("Browser: {}", name),
+                                &format_browser_action(name, input),
                                 Some(input.clone()),
                                 None,
                             );
@@ -587,13 +602,30 @@ impl Agent {
                 summarize_old_snapshots(&mut messages);
             }
 
-            messages.push(Message {
+            let tool_result_message = Message {
                 role: "user".to_string(),
                 content: tool_results,
-            });
+            };
+            messages.push(tool_result_message.clone());
+            conversation.add_message(tool_result_message);
         }
 
         self.running.store(false, Ordering::SeqCst);
+
+        // save conversation if we have any messages
+        if !conversation.messages.is_empty() {
+            conversation.auto_title();
+            if let Err(e) = storage::save_conversation(&conversation) {
+                println!("[agent] Failed to save conversation: {}", e);
+            } else {
+                println!("[agent] Saved conversation {} ({} msgs, {} input, {} output tokens)",
+                    conversation.id,
+                    conversation.messages.len(),
+                    conversation.total_input_tokens,
+                    conversation.total_output_tokens
+                );
+            }
+        }
         let _ = app_handle.emit("agent:stopped", ());
 
         // emit border hide for frontend to call IPC command
@@ -761,6 +793,89 @@ const BROWSER_TOOLS: &[&str] = &[
 
 fn is_browser_tool(name: &str) -> bool {
     BROWSER_TOOLS.contains(&name)
+}
+
+fn format_browser_action(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "take_snapshot" => "Taking snapshot".to_string(),
+        "click" => {
+            let dbl = input.get("dblClick").and_then(|v| v.as_bool()).unwrap_or(false);
+            if dbl { "Double clicking".to_string() } else { "Clicking".to_string() }
+        }
+        "hover" => "Hovering".to_string(),
+        "fill" => {
+            if let Some(val) = input.get("value").and_then(|v| v.as_str()) {
+                let preview = if val.len() > 20 { format!("{}...", &val[..20]) } else { val.to_string() };
+                format!("Filling: \"{}\"", preview)
+            } else {
+                "Filling field".to_string()
+            }
+        }
+        "press_key" => {
+            if let Some(key) = input.get("key").and_then(|v| v.as_str()) {
+                format!("Pressing {}", key)
+            } else {
+                "Pressing key".to_string()
+            }
+        }
+        "navigate_page" => {
+            match input.get("type").and_then(|v| v.as_str()) {
+                Some("goto") => {
+                    if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
+                        let preview = if url.len() > 40 { format!("{}...", &url[..40]) } else { url.to_string() };
+                        format!("Navigating to {}", preview)
+                    } else {
+                        "Navigating".to_string()
+                    }
+                }
+                Some("back") => "Going back".to_string(),
+                Some("forward") => "Going forward".to_string(),
+                Some("reload") => "Reloading page".to_string(),
+                _ => "Navigating".to_string(),
+            }
+        }
+        "wait_for" => {
+            if let Some(text) = input.get("text").and_then(|v| v.as_str()) {
+                let preview = if text.len() > 20 { format!("{}...", &text[..20]) } else { text.to_string() };
+                format!("Waiting for \"{}\"", preview)
+            } else {
+                "Waiting".to_string()
+            }
+        }
+        "new_page" => {
+            if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
+                let preview = if url.len() > 40 { format!("{}...", &url[..40]) } else { url.to_string() };
+                format!("Opening new tab: {}", preview)
+            } else {
+                "Opening new tab".to_string()
+            }
+        }
+        "list_pages" => "Listing tabs".to_string(),
+        "select_page" => {
+            if let Some(idx) = input.get("pageIdx").and_then(|v| v.as_u64()) {
+                format!("Switching to tab {}", idx)
+            } else {
+                "Switching tab".to_string()
+            }
+        }
+        "close_page" => {
+            if let Some(idx) = input.get("pageIdx").and_then(|v| v.as_u64()) {
+                format!("Closing tab {}", idx)
+            } else {
+                "Closing tab".to_string()
+            }
+        }
+        "drag" => "Dragging".to_string(),
+        "fill_form" => "Filling form".to_string(),
+        "handle_dialog" => {
+            match input.get("action").and_then(|v| v.as_str()) {
+                Some("accept") => "Accepting dialog".to_string(),
+                Some("dismiss") => "Dismissing dialog".to_string(),
+                _ => "Handling dialog".to_string(),
+            }
+        }
+        _ => format!("Browser: {}", name),
+    }
 }
 
 async fn execute_browser_tool(
