@@ -451,12 +451,17 @@ mod storage_cmd {
 // --- voice IPC commands ---
 
 mod voice_cmd {
-    use crate::voice::VoiceSession;
+    use crate::voice::{VoiceSession, PushToTalkSession};
     use std::sync::Arc;
     use tauri::State;
 
     pub struct VoiceState {
         pub session: Arc<VoiceSession>,
+    }
+
+    pub struct PttState {
+        pub session: Arc<PushToTalkSession>,
+        pub screenshot: std::sync::Mutex<Option<String>>,
     }
 
     #[tauri::command]
@@ -491,6 +496,41 @@ mod voice_cmd {
     pub fn is_voice_running(state: State<'_, VoiceState>) -> Result<bool, String> {
         Ok(state.session.is_running())
     }
+
+    #[tauri::command]
+    pub async fn start_ptt(
+        app_handle: tauri::AppHandle,
+        state: State<'_, PttState>,
+        screenshot: Option<String>,
+    ) -> Result<(), String> {
+        println!("[ptt cmd] start_ptt called");
+
+        // store screenshot for later
+        if let Some(ss) = screenshot {
+            *state.screenshot.lock().unwrap() = Some(ss);
+        }
+
+        let api_key = std::env::var("DEEPGRAM_API_KEY")
+            .map_err(|_| "DEEPGRAM_API_KEY not set in .env".to_string())?;
+
+        state.session.start(api_key, app_handle).await
+    }
+
+    #[tauri::command]
+    pub async fn stop_ptt(
+        state: State<'_, PttState>,
+    ) -> Result<(String, Option<String>), String> {
+        println!("[ptt cmd] stop_ptt called");
+        let text = state.session.stop().await;
+        let screenshot = state.screenshot.lock().unwrap().take();
+        println!("[ptt cmd] got text: '{}', screenshot: {}", text, screenshot.is_some());
+        Ok((text, screenshot))
+    }
+
+    #[tauri::command]
+    pub fn is_ptt_running(state: State<'_, PttState>) -> Result<bool, String> {
+        Ok(state.session.is_running())
+    }
 }
 
 fn main() {
@@ -523,7 +563,94 @@ fn main() {
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyQ))
                 .unwrap()
+                .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV))
+                .unwrap()
                 .with_handler(move |app, shortcut, event| {
+                    // Cmd+Shift+V - push-to-talk (handles both press and release)
+                    if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyV) {
+                        match event.state {
+                            ShortcutState::Pressed => {
+                                println!("[ptt] Cmd+Shift+V pressed - starting recording");
+
+                                // capture screenshot first
+                                let screenshot = match computer::ComputerControl::new() {
+                                    Ok(control) => control.take_screenshot().ok(),
+                                    Err(_) => None,
+                                };
+
+                                // play recording start sound
+                                #[cfg(target_os = "macos")]
+                                {
+                                    std::process::Command::new("afplay")
+                                        .arg("/System/Library/Sounds/Tink.aiff")
+                                        .spawn()
+                                        .ok();
+                                }
+
+                                // emit event to show recording indicator
+                                let _ = app.emit("ptt:recording", serde_json::json!({ "recording": true }));
+
+                                // start PTT recording via command
+                                let app_clone = app.clone();
+                                let screenshot_clone = screenshot.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
+                                        let api_key = match std::env::var("DEEPGRAM_API_KEY") {
+                                            Ok(k) => k,
+                                            Err(_) => {
+                                                let _ = app_clone.emit("ptt:error", "DEEPGRAM_API_KEY not set");
+                                                return;
+                                            }
+                                        };
+
+                                        // store screenshot
+                                        if let Some(ss) = screenshot_clone {
+                                            *ptt_state.screenshot.lock().unwrap() = Some(ss);
+                                        }
+
+                                        if let Err(e) = ptt_state.session.start(api_key, app_clone.clone()).await {
+                                            println!("[ptt] start error: {}", e);
+                                            let _ = app_clone.emit("ptt:error", e);
+                                        }
+                                    }
+                                });
+                            }
+                            ShortcutState::Released => {
+                                println!("[ptt] Cmd+Shift+V released - stopping recording");
+
+                                // play recording stop sound
+                                #[cfg(target_os = "macos")]
+                                {
+                                    std::process::Command::new("afplay")
+                                        .arg("/System/Library/Sounds/Pop.aiff")
+                                        .spawn()
+                                        .ok();
+                                }
+
+                                let _ = app.emit("ptt:recording", serde_json::json!({ "recording": false }));
+
+                                // stop recording and get result
+                                let app_clone = app.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
+                                        let text = ptt_state.session.stop().await;
+                                        let screenshot = ptt_state.screenshot.lock().unwrap().take();
+
+                                        println!("[ptt] result: text='{}', screenshot={}", text, screenshot.is_some());
+
+                                        // emit result event
+                                        let _ = app_clone.emit("ptt:result", serde_json::json!({
+                                            "text": text,
+                                            "screenshot": screenshot
+                                        }));
+                                    }
+                                });
+                            }
+                        }
+                        return;
+                    }
+
+                    // other shortcuts only on press
                     if event.state != ShortcutState::Pressed {
                         return;
                     }
@@ -587,6 +714,10 @@ fn main() {
         })
         .manage(voice_cmd::VoiceState {
             session: Arc::new(voice::VoiceSession::new()),
+        })
+        .manage(voice_cmd::PttState {
+            session: Arc::new(voice::PushToTalkSession::new()),
+            screenshot: std::sync::Mutex::new(None),
         })
         .setup(|app| {
             // hide from dock - menubar app only
@@ -833,6 +964,9 @@ fn main() {
             voice_cmd::start_voice,
             voice_cmd::stop_voice,
             voice_cmd::is_voice_running,
+            voice_cmd::start_ptt,
+            voice_cmd::stop_ptt,
+            voice_cmd::is_ptt_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

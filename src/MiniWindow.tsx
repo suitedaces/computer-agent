@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { motion } from "framer-motion";
-import { ChevronRight, Send, X } from "lucide-react";
+import { ChevronRight, Send, X, Mic, RotateCcw } from "lucide-react";
 import ChatView from "./components/ChatView";
 import { useAgent } from "./hooks/useAgent";
 
@@ -14,6 +14,12 @@ export default function MiniWindow() {
   const [helpPrompt, setHelpPrompt] = useState("");
   const [helpScreenshot, setHelpScreenshot] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // PTT state
+  const [pttRecording, setPttRecording] = useState(false);
+  const [pttInterim, setPttInterim] = useState("");
+  const [pttRetryMode, setPttRetryMode] = useState(false);
+  const [pttRetryScreenshot, setPttRetryScreenshot] = useState<string | null>(null);
 
   // poll running state and resize window
   useEffect(() => {
@@ -57,12 +63,70 @@ export default function MiniWindow() {
       }
     });
 
+    // PTT recording state
+    const unlisten4 = listen<{ recording: boolean }>("ptt:recording", (e) => {
+      console.log("[ptt] recording:", e.payload.recording);
+      setPttRecording(e.payload.recording);
+      if (e.payload.recording) {
+        setPttInterim("");
+        setPttRetryMode(false);
+      }
+    });
+
+    // PTT interim transcription
+    const unlisten5 = listen<string>("ptt:interim", (e) => {
+      console.log("[ptt] interim:", e.payload);
+      setPttInterim(e.payload);
+    });
+
+    // PTT result - auto-submit or show retry
+    const unlisten6 = listen<{ text: string; screenshot: string | null }>("ptt:result", async (e) => {
+      console.log("[ptt] result:", e.payload);
+      setPttRecording(false);
+      setPttInterim("");
+
+      const { text, screenshot } = e.payload;
+
+      if (!text.trim()) {
+        // empty transcription - show retry mode
+        console.log("[ptt] empty transcription, showing retry");
+        setPttRetryMode(true);
+        setPttRetryScreenshot(screenshot);
+
+        // show mini window in retry mode
+        const win = getCurrentWindow();
+        await win.setSize(new LogicalSize(320, 180));
+        return;
+      }
+
+      // has transcription - auto-submit to spotlight
+      try {
+        await invoke("show_spotlight_window");
+        await new Promise((r) => setTimeout(r, 150));
+        await submit(text, screenshot ?? undefined);
+        await invoke("hide_mini_window");
+      } catch (err) {
+        console.error("[ptt] submit failed:", err);
+      }
+    });
+
+    // PTT error
+    const unlisten7 = listen<string>("ptt:error", (e) => {
+      console.error("[ptt] error:", e.payload);
+      setPttRecording(false);
+      setPttInterim("");
+    });
+
     return () => {
       unlisten1.then((f) => f());
       unlisten2.then((f) => f());
       unlisten3.then((f) => f());
+      unlisten4.then((f) => f());
+      unlisten5.then((f) => f());
+      unlisten6.then((f) => f());
+      unlisten7.then((f) => f());
     };
-  }, []);
+  }, [submit]);
 
   const handleOpenMain = async () => {
     try {
@@ -187,6 +251,77 @@ export default function MiniWindow() {
               </button>
             </motion.div>
           </motion.div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // PTT recording indicator overlay
+  if (pttRecording && !isRunning) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center p-4 bg-black/60">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center gap-3"
+        >
+          <motion.div
+            animate={{ scale: [1, 1.2, 1] }}
+            transition={{ repeat: Infinity, duration: 1.5 }}
+            className="w-16 h-16 rounded-full bg-red-500/30 border-2 border-red-400 flex items-center justify-center"
+          >
+            <Mic size={28} className="text-red-400" />
+          </motion.div>
+          <span className="text-white/80 text-sm">Recording...</span>
+          {pttInterim && (
+            <span className="text-white/50 text-xs max-w-[200px] text-center truncate">
+              {pttInterim}
+            </span>
+          )}
+          <span className="text-white/30 text-[10px]">Release Cmd+Shift+V to send</span>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // PTT retry mode - empty transcription
+  if (pttRetryMode && !isRunning) {
+    const handleRetryCancel = async () => {
+      setPttRetryMode(false);
+      setPttRetryScreenshot(null);
+      await invoke("show_mini_window");
+    };
+
+    return (
+      <div className="h-screen w-screen flex items-center justify-center p-3 bg-black/40">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full bg-zinc-900/95 rounded-xl border border-white/10 p-4"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center">
+              <Mic size={16} className="text-orange-400" />
+            </div>
+            <div>
+              <div className="text-white/90 text-sm font-medium">No speech detected</div>
+              <div className="text-white/40 text-[11px]">Hold Cmd+Shift+V and speak</div>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleRetryCancel}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 transition-all text-[11px]"
+            >
+              <X size={12} />
+              <span>Cancel</span>
+            </button>
+            <div className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-orange-500/20 border border-orange-400/30 text-orange-300 text-[11px]">
+              <RotateCcw size={12} />
+              <span>Try again</span>
+            </div>
+          </div>
         </motion.div>
       </div>
     );
