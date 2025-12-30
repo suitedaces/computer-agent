@@ -587,18 +587,18 @@ fn main() {
                                         .ok();
                                 }
 
-                                // resize mini window to show recording indicator (compact, expands with text)
+                                // resize mini window for orb UI (200px orb + text below)
                                 #[cfg(target_os = "macos")]
                                 if let Some(panel) = MINI_PANEL.get() {
                                     if let Some(window) = app.get_webview_window("mini") {
-                                        let _ = window.set_size(tauri::LogicalSize::new(320.0, 120.0));
-                                        position_window_center(&window, 320.0, 120.0);
+                                        let _ = window.set_size(tauri::LogicalSize::new(300.0, 300.0));
+                                        position_window_center(&window, 300.0, 300.0);
                                     }
                                     panel.show();
                                 }
                                 #[cfg(not(target_os = "macos"))]
                                 if let Some(window) = app.get_webview_window("mini") {
-                                    let _ = window.set_size(tauri::LogicalSize::new(320.0, 120.0));
+                                    let _ = window.set_size(tauri::LogicalSize::new(300.0, 300.0));
                                     let _ = window.show();
                                 }
 

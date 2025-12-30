@@ -2,10 +2,11 @@ import { useEffect, useState, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { motion } from "framer-motion";
-import { ChevronRight, Send, X, Mic, RotateCcw } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ChevronRight, Send, X } from "lucide-react";
 import ChatView from "./components/ChatView";
 import { useAgent } from "./hooks/useAgent";
+import VoiceOrb from "./components/VoiceOrb";
 
 export default function MiniWindow() {
   const { submit } = useAgent();
@@ -19,7 +20,6 @@ export default function MiniWindow() {
   const [pttRecording, setPttRecording] = useState(false);
   const [pttInterim, setPttInterim] = useState("");
   const [pttRetryMode, setPttRetryMode] = useState(false);
-  const [pttRetryScreenshot, setPttRetryScreenshot] = useState<string | null>(null);
 
   // poll running state and resize window
   useEffect(() => {
@@ -91,11 +91,10 @@ export default function MiniWindow() {
         // empty transcription - show retry mode
         console.log("[ptt] empty transcription, showing retry");
         setPttRetryMode(true);
-        setPttRetryScreenshot(screenshot);
 
         // show mini window in retry mode
         const win = getCurrentWindow();
-        await win.setSize(new LogicalSize(320, 180));
+        await win.setSize(new LogicalSize(300, 300));
         return;
       }
 
@@ -256,79 +255,78 @@ export default function MiniWindow() {
     );
   }
 
-  // PTT recording indicator overlay
+  // PTT recording - orb with streaming text, fully transparent
   if (pttRecording && !isRunning) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center p-4 bg-black/60">
+      <div className="h-screen w-screen flex flex-col items-center justify-center">
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-[280px] bg-zinc-900/95 rounded-xl border border-red-500/30 p-4"
+          className="flex flex-col items-center"
         >
-          <div className="flex items-center gap-3 mb-2">
-            <motion.div
-              animate={{ scale: [1, 1.15, 1] }}
-              transition={{ repeat: Infinity, duration: 1.2 }}
-              className="w-10 h-10 rounded-full bg-red-500/30 border border-red-400 flex items-center justify-center flex-shrink-0"
-            >
-              <Mic size={18} className="text-red-400" />
-            </motion.div>
-            <div className="flex-1 min-w-0">
-              <span className="text-white/80 text-sm font-medium">Recording...</span>
-              <div className="text-white/30 text-[10px]">Release to send</div>
-            </div>
-          </div>
+          <VoiceOrb isActive={true} volume={0.3} size={200} />
 
-          {pttInterim && (
-            <div className="mt-2 p-2 bg-white/5 rounded-lg border border-white/10">
-              <p className="text-white/70 text-sm leading-relaxed break-words">
-                {pttInterim}
-              </p>
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {pttInterim ? (
+              <motion.div
+                key="interim"
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="mt-4 px-4 py-2.5 bg-black rounded-lg"
+              >
+                <p className="text-white font-medium text-[14px] text-center max-w-[220px] leading-relaxed">
+                  {pttInterim}
+                </p>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="hint"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="mt-4 px-4 py-2 bg-black rounded-full"
+              >
+                <p className="text-white/90 text-[12px]">listening...</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </div>
     );
   }
 
-  // PTT retry mode - empty transcription
+  // PTT retry mode - empty transcription, transparent with orb
   if (pttRetryMode && !isRunning) {
     const handleRetryCancel = async () => {
       setPttRetryMode(false);
-      setPttRetryScreenshot(null);
       await invoke("show_mini_window");
     };
 
     return (
-      <div className="h-screen w-screen flex items-center justify-center p-3 bg-black/40">
+      <div className="h-screen w-screen flex flex-col items-center justify-center">
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full bg-zinc-900/95 rounded-xl border border-white/10 p-4"
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center"
         >
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center">
-              <Mic size={16} className="text-orange-400" />
-            </div>
-            <div>
-              <div className="text-white/90 text-sm font-medium">No speech detected</div>
-              <div className="text-white/40 text-[11px]">Hold Cmd+Shift+V and speak</div>
-            </div>
-          </div>
+          <VoiceOrb isActive={false} volume={0} size={200} />
 
-          <div className="flex gap-2">
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 px-4 py-3 bg-black rounded-xl text-center"
+          >
+            <p className="text-white/90 text-[13px] font-medium">No speech detected</p>
+            <p className="text-white/50 text-[11px] mt-1">Hold ⌘⇧V and speak</p>
+
             <button
               onClick={handleRetryCancel}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 transition-all text-[11px]"
+              className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/20 rounded-full text-white/70 text-[11px] transition-colors"
             >
-              <X size={12} />
-              <span>Cancel</span>
+              Dismiss
             </button>
-            <div className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-orange-500/20 border border-orange-400/30 text-orange-300 text-[11px]">
-              <RotateCcw size={12} />
-              <span>Try again</span>
-            </div>
-          </div>
+          </motion.div>
         </motion.div>
       </div>
     );
