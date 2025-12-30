@@ -397,51 +397,19 @@ impl AnthropicClient {
     }
 }
 
-const SYSTEM_PROMPT: &str = r#"You are taskhomie, a computer control agent in a macOS menubar app. You see the screen, move the mouse, click, type, and run bash commands.
+const SYSTEM_PROMPT: &str = r#"You are taskhomie, a macOS computer control agent. You see the screen, control mouse/keyboard, and run bash.
 
-Rules:
-- Click to focus before typing
-- Screenshot after actions to verify
-- Use keyboard shortcuts (cmd+c, cmd+v, cmd+tab, cmd+w, cmd+q)
-- If something fails, try another approach
-- Always call a tool, never just text
-- Keep responses concise
-- Use `sleep N` in bash when waiting for pages, animations, or downloads to complete
+Take action with tools on every turn. Click to focus before typing. Screenshot after actions to verify. If something fails, try another approach.
 
-macOS CLI shortcuts (fast, use when applicable):
-- open -a "App" (launch), open file.pdf (default app), open https://url (browser)
-- pbpaste/pbcopy (clipboard), mdfind "query" (spotlight search)
-- osascript -e 'tell app "X" to activate/quit'
+Prefer bash for speed: open -a "App", open https://url, pbcopy/pbpaste, mdfind. Use `sleep N` when waiting.
 
-Use computer tool for:
-- Browser interactions (clicking links, filling forms, reading page content)
-- Any visual/UI task requiring mouse clicks or reading the screen
-- Tasks where you need to see what happened"#;
+Use computer tool for visual tasks: clicking UI, reading screen content, filling forms."#;
 
-const BROWSER_SYSTEM_PROMPT: &str = r#"You are taskhomie in browser mode. You control the browser via Chrome DevTools Protocol.
+const BROWSER_SYSTEM_PROMPT: &str = r#"You are taskhomie in browser mode. You control Chrome via CDP.
 
-CRITICAL: You MUST use tools. Never respond with just text. Always call a tool.
+Start every task with take_snapshot to see the page. Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
 
-Your first action on any task: call take_snapshot to see the current page state.
-
-Available tools:
-- take_snapshot: Get page accessibility tree with element uids
-- click: Click element by uid
-- fill: Type text into input by uid
-- press_key: Press key combo (e.g. "Enter", "Control+A")
-- navigate_page: Go to URL, back, forward, or reload
-- wait_for: Wait for text to appear on page
-- new_page: Open new tab with URL
-- list_pages: See open tabs
-- select_page: Switch to different tab
-- hover: Hover over element by uid
-
-Rules:
-1. ALWAYS call take_snapshot first before any other action
-2. Use uids from the LATEST snapshot only (stale uids will fail)
-3. After navigation or clicks that change the page, take a new snapshot
-4. NEVER respond with just text - always call a tool
-5. Use bash for file operations, not browser"#;
+Take action with tools on every turn. Use bash for file operations."#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
@@ -603,6 +571,79 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
                     }
                 },
                 "required": ["pageIdx"]
+            }
+        }),
+        serde_json::json!({
+            "name": "close_page",
+            "description": "Close a browser tab by index. Cannot close the last open page.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pageIdx": {
+                        "type": "number",
+                        "description": "Index of the page to close (from list_pages)"
+                    }
+                },
+                "required": ["pageIdx"]
+            }
+        }),
+        serde_json::json!({
+            "name": "drag",
+            "description": "Drag an element and drop it onto another element",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "from_uid": {
+                        "type": "string",
+                        "description": "The uid of the element to drag"
+                    },
+                    "to_uid": {
+                        "type": "string",
+                        "description": "The uid of the element to drop onto"
+                    }
+                },
+                "required": ["from_uid", "to_uid"]
+            }
+        }),
+        serde_json::json!({
+            "name": "fill_form",
+            "description": "Fill multiple form elements at once",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "elements": {
+                        "type": "array",
+                        "description": "Array of {uid, value} objects to fill",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "uid": { "type": "string" },
+                                "value": { "type": "string" }
+                            },
+                            "required": ["uid", "value"]
+                        }
+                    }
+                },
+                "required": ["elements"]
+            }
+        }),
+        serde_json::json!({
+            "name": "handle_dialog",
+            "description": "Handle a browser dialog (alert, confirm, prompt)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["accept", "dismiss"],
+                        "description": "Whether to accept or dismiss the dialog"
+                    },
+                    "promptText": {
+                        "type": "string",
+                        "description": "Text to enter for prompt dialogs (optional)"
+                    }
+                },
+                "required": ["action"]
             }
         }),
     ]

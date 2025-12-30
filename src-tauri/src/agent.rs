@@ -496,7 +496,7 @@ impl Agent {
                                 let result = execute_browser_tool(browser, name, input).await;
                                 match result {
                                     Ok(output) => {
-                                        println!("[agent] Browser tool success: {}...", &output[..output.len().min(200)]);
+                                        println!("[agent] Browser tool success ({} chars): {}...", output.len(), &output[..output.len().min(200)]);
                                         self.emit(&app_handle, "browser_result", &output, None, None);
                                         tool_results.push(ContentBlock::ToolResult {
                                             tool_use_id: id.clone(),
@@ -506,7 +506,9 @@ impl Agent {
                                     Err(e) => {
                                         let err_msg = format!("Browser error: {}", e);
                                         println!("[agent] Browser tool failed: {}", err_msg);
-                                        self.emit(&app_handle, "error", &err_msg, None, None);
+                                        // emit browser_result not error - tool failures are expected
+                                        // (e.g. wait_for timeouts) and the model handles them gracefully
+                                        self.emit(&app_handle, "browser_result", &err_msg, None, None);
                                         tool_results.push(ContentBlock::ToolResult {
                                             tool_use_id: id.clone(),
                                             content: vec![ToolResultContent::Text { text: err_msg }],
@@ -542,6 +544,25 @@ impl Agent {
                 println!("[agent] No tool calls, task complete");
                 self.emit(&app_handle, "finished", "Task completed", None, None);
                 break;
+            }
+
+            // check if we're adding a new snapshot - if so, summarize old ones
+            let has_new_snapshot = tool_results.iter().any(|r| {
+                if let ContentBlock::ToolResult { content, .. } = r {
+                    content.iter().any(|c| {
+                        if let ToolResultContent::Text { text } = c {
+                            text.starts_with("uid=")
+                        } else {
+                            false
+                        }
+                    })
+                } else {
+                    false
+                }
+            });
+
+            if has_new_snapshot {
+                summarize_old_snapshots(&mut messages);
             }
 
             messages.push(Message {
@@ -704,12 +725,16 @@ const BROWSER_TOOLS: &[&str] = &[
     "click",
     "hover",
     "fill",
+    "fill_form",
+    "drag",
     "press_key",
     "navigate_page",
     "wait_for",
     "new_page",
     "list_pages",
     "select_page",
+    "close_page",
+    "handle_dialog",
 ];
 
 fn is_browser_tool(name: &str) -> bool {
@@ -776,6 +801,96 @@ async fn execute_browser_tool(
             let bring_to_front = input.get("bringToFront").and_then(|v| v.as_bool()).unwrap_or(false);
             browser.select_page(page_idx, bring_to_front).await
         }
+        "close_page" => {
+            let page_idx = input.get("pageIdx").and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow::anyhow!("pageIdx required"))? as usize;
+            browser.close_page(page_idx).await
+        }
+        "drag" => {
+            let from_uid = input.get("from_uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("from_uid required"))?;
+            let to_uid = input.get("to_uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("to_uid required"))?;
+            browser.drag(from_uid, to_uid).await
+        }
+        "fill_form" => {
+            let elements = input.get("elements").and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow::anyhow!("elements array required"))?;
+            let pairs: Vec<(String, String)> = elements.iter().filter_map(|el| {
+                let uid = el.get("uid").and_then(|v| v.as_str())?;
+                let value = el.get("value").and_then(|v| v.as_str())?;
+                Some((uid.to_string(), value.to_string()))
+            }).collect();
+            browser.fill_form(&pairs).await
+        }
+        "handle_dialog" => {
+            let action = input.get("action").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("action required (accept/dismiss)"))?;
+            let accept = action == "accept";
+            let prompt_text = input.get("promptText").and_then(|v| v.as_str());
+            browser.handle_dialog(accept, prompt_text).await
+        }
         _ => Err(anyhow::anyhow!("unknown browser tool: {}", name)),
     }
+}
+
+// summarize old snapshots to reduce context size
+// keeps only interactive elements (links, buttons, inputs, headings)
+fn summarize_old_snapshots(messages: &mut Vec<Message>) {
+    for message in messages.iter_mut() {
+        if message.role != "user" {
+            continue;
+        }
+
+        for block in message.content.iter_mut() {
+            if let ContentBlock::ToolResult { content, .. } = block {
+                for item in content.iter_mut() {
+                    if let ToolResultContent::Text { text } = item {
+                        // check if it's a snapshot (starts with uid=)
+                        if text.starts_with("uid=") && text.len() > 5000 {
+                            *text = summarize_snapshot(text);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn summarize_snapshot(snapshot: &str) -> String {
+    // keep only lines with interactive roles
+    let interactive_roles = [
+        "link", "button", "textbox", "checkbox", "radio", "combobox",
+        "searchbox", "slider", "switch", "menuitem", "tab", "heading",
+        "WebArea", // keep the root
+    ];
+
+    let mut summary_lines: Vec<&str> = Vec::new();
+    let mut kept_count = 0;
+    let mut total_count = 0;
+
+    for line in snapshot.lines() {
+        total_count += 1;
+        let trimmed = line.trim();
+
+        // keep line if it contains any interactive role
+        let should_keep = interactive_roles.iter().any(|role| {
+            // match "uid=X_Y role" pattern
+            trimmed.contains(&format!(" {} ", role)) ||
+            trimmed.contains(&format!(" {} \"", role)) ||
+            trimmed.ends_with(&format!(" {}", role))
+        });
+
+        if should_keep {
+            summary_lines.push(line);
+            kept_count += 1;
+        }
+    }
+
+    let header = format!(
+        "[snapshot summarized: {} interactive elements from {} total]\n",
+        kept_count, total_count
+    );
+
+    header + &summary_lines.join("\n")
 }

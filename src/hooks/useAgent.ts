@@ -106,6 +106,11 @@ export function useAgent() {
         case "bash_result":
           updateLastBashWithResult(message, exit_code);
           break;
+
+        case "browser_result":
+          // mark the last action as complete when browser tool finishes
+          markLastActionComplete();
+          break;
       }
     });
 

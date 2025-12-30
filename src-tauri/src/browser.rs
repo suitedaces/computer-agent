@@ -14,7 +14,9 @@ use chromiumoxide::cdp::browser_protocol::input::{
     DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams,
     DispatchMouseEventType, MouseButton,
 };
-use chromiumoxide::cdp::browser_protocol::page::{NavigateParams, ReloadParams};
+use chromiumoxide::cdp::browser_protocol::page::{
+    CloseParams, HandleJavaScriptDialogParams, NavigateParams, ReloadParams,
+};
 use chromiumoxide::handler::Handler;
 use chromiumoxide::Page;
 use futures::StreamExt;
@@ -423,6 +425,115 @@ impl BrowserClient {
         }
 
         Ok(format!("Selected page {page_idx}"))
+    }
+
+    // tool: close_page
+    pub async fn close_page(&mut self, page_idx: usize) -> Result<String> {
+        self.refresh_pages().await?;
+
+        if self.pages.len() <= 1 {
+            return Err(anyhow!("cannot close the last open page"));
+        }
+
+        if page_idx >= self.pages.len() {
+            return Err(anyhow!(
+                "page index {page_idx} out of range (0..{})",
+                self.pages.len()
+            ));
+        }
+
+        let page = &self.pages[page_idx];
+        page.execute(CloseParams::default()).await?;
+
+        // remove from our list
+        self.pages.remove(page_idx);
+
+        // adjust selected index if needed
+        if self.selected_page_idx >= self.pages.len() {
+            self.selected_page_idx = self.pages.len().saturating_sub(1);
+        }
+
+        Ok(format!("Closed page {page_idx}"))
+    }
+
+    // tool: drag (drag element from one uid to another)
+    pub async fn drag(&mut self, from_uid: &str, to_uid: &str) -> Result<String> {
+        let (from_x, from_y) = self.resolve_uid_to_point(from_uid).await?;
+        let (to_x, to_y) = self.resolve_uid_to_point(to_uid).await?;
+        let page = self.selected_page()?;
+
+        // mouse down at source
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MousePressed)
+                .x(from_x)
+                .y(from_y)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+        // move to target
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MouseMoved)
+                .x(to_x)
+                .y(to_y)
+                .button(MouseButton::Left)
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+        // mouse up at target
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MouseReleased)
+                .x(to_x)
+                .y(to_y)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+        Ok("Successfully dragged element".to_string())
+    }
+
+    // tool: fill_form (fill multiple form elements at once)
+    pub async fn fill_form(&mut self, elements: &[(String, String)]) -> Result<String> {
+        let mut filled = 0;
+        for (uid, value) in elements {
+            self.fill(uid, value).await?;
+            filled += 1;
+        }
+        Ok(format!("Filled {filled} form elements"))
+    }
+
+    // tool: handle_dialog (accept/dismiss browser dialogs)
+    pub async fn handle_dialog(&mut self, accept: bool, prompt_text: Option<&str>) -> Result<String> {
+        let page = self.selected_page()?;
+
+        let params = if let Some(text) = prompt_text {
+            HandleJavaScriptDialogParams::builder()
+                .accept(accept)
+                .prompt_text(text)
+                .build()
+                .unwrap()
+        } else {
+            HandleJavaScriptDialogParams::builder()
+                .accept(accept)
+                .build()
+                .unwrap()
+        };
+
+        page.execute(params).await?;
+
+        let action = if accept { "accepted" } else { "dismissed" };
+        Ok(format!("Successfully {action} dialog"))
     }
 
     // helper: get backend node id from uid
