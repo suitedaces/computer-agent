@@ -468,7 +468,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   const getBubbleStyle = () => {
     if (isUser) {
-      return "bg-blue-500/30 border-blue-400/30 px-3 py-2 rounded-2xl border backdrop-blur-sm";
+      return "bg-white/10 border-white/20 px-3 py-2 rounded-2xl border backdrop-blur-sm";
     }
     return "";
   };
@@ -1124,7 +1124,7 @@ export default function ChatView({ variant }: ChatViewProps) {
               whileTap={{ scale: 0.95 }}
               className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
                 inputText.trim()
-                  ? "bg-blue-500/30 border border-blue-400/30 text-blue-300"
+                  ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
                   : "bg-white/5 border border-white/10 text-white/20"
               }`}
             >
