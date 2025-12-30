@@ -11,33 +11,19 @@ https://github.com/user-attachments/assets/8edd92a7-7d3e-472a-9e48-3b561f0257d6
 
 Here, I used it to autonomously read and reply to tweets, lol. This is purely for demonstration/research, you should not attempt to do the same, lol.
 
-## Disclaimers
-
-1. **Experimental software** - An AI controls your mouse and keyboard. Things can go wrong.
-2. **You're responsible** - If it wipes your computer, sends emails, or orders 100 pizzas... that's on you.
-3. **Anthropic sees your screen** - Screenshots are sent to the API during actions. Hide sensitive info.
-
-## How It Works
-
-1. You type an instruction ("open firefox and search for cats")
-2. Agent takes a screenshot of your screen
-3. Agent decides what to do: move mouse, click, type, run bash commands
-4. Action is executed, new screenshot is taken
-5. Loop continues until task is complete
-
 ## Modes
 
-**Computer Use** - Screenshots + mouse/keyboard control via enigo and xcap
+**Hands-Off Mode (Computer Use)** - Takes over your entire screen. Controls mouse, keyboard, any app. Use when task spans multiple apps or needs full desktop access. Toggle via "Hands Off" button in titlebar.
 
-**Browser Use** - Native Chrome DevTools Protocol via chromiumoxide (Rust). Auto-connects to running Chrome or launches with debugging enabled. 14 browser tools: snapshot, click, fill, hover, navigate, wait, new_page, list_pages, select_page, close_page, drag, fill_form, handle_dialog, upload_file.
+**Browser Mode** - Uses Chrome DevTools Protocol (CDP) instead of mouse/keyboard simulation. Reads page accessibility tree instead of screenshots. Faster and more reliable for web-only tasks. Uses isolated Chrome profile (`~/.taskhomie-chrome`) and auto-launches Chrome with debugging if needed.
 
 **Bash** - Terminal commands with safety guards against destructive operations
 
 ## Setup
 
 **Requirements:**
-- Node.js & npm
 - Rust & Cargo
+- Node.js & npm
 - Anthropic API key
 
 ```bash
@@ -55,6 +41,11 @@ npm run tauri build
 ```
 
 On macOS, you'll need to grant accessibility permissions when prompted (System Settings → Privacy & Security → Accessibility).
+
+## Shortcuts
+
+- `⌘⇧S` - stop agent
+- `⌘⇧H` - help mode (screenshot + quick prompt from mini bar)
 
 ## Stack
 
