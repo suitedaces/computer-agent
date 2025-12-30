@@ -642,9 +642,7 @@ fn main() {
                                         .ok();
                                 }
 
-                                let _ = app.emit("ptt:recording", serde_json::json!({ "recording": false }));
-
-                                // stop recording and get result
+// stop recording and get result
                                 let app_clone = app.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
@@ -652,6 +650,9 @@ fn main() {
                                         let screenshot = ptt_state.screenshot.lock().unwrap().take();
 
                                         println!("[ptt] result: text='{}', screenshot={}", text, screenshot.is_some());
+
+                                        // emit recording=false right before result so UI doesn't flash to idle bar
+                                        let _ = app_clone.emit("ptt:recording", serde_json::json!({ "recording": false }));
 
                                         // emit result event
                                         let _ = app_clone.emit("ptt:result", serde_json::json!({
