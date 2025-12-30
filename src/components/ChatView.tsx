@@ -19,12 +19,176 @@ import {
   X,
   Maximize2,
   Minimize2,
-  Monitor,
   Plus,
   MessageSquare,
   Trash2,
+  Globe,
+  Hand,
+  Navigation,
+  Layers,
+  MousePointerClick,
+  FormInput,
+  RotateCw,
+  PanelTop,
+  FileUp,
+  MessageCircle,
+  Eye,
+  GripHorizontal,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+
+// url pill component showing domain and path
+function UrlLink({ url }: { url: string }) {
+  let domain = "";
+  let path = "";
+  try {
+    const parsed = new URL(url);
+    domain = parsed.hostname.replace(/^www\./, "");
+    path = parsed.pathname !== "/" ? parsed.pathname : "";
+    if (path.length > 20) path = path.slice(0, 20) + "...";
+  } catch {
+    domain = url.length > 30 ? url.slice(0, 30) + "..." : url;
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white/10 rounded text-[11px] font-mono">
+      <Globe size={10} className="opacity-50" />
+      <span className="opacity-70">{domain}</span>
+      {path && <span className="opacity-40">{path}</span>}
+    </span>
+  );
+}
+
+// format action for display (past tense for loaded history)
+// stores url in format "action||url" when url is present for later rendering
+function formatActionForHistory(name: string, input: Record<string, unknown>): string {
+  // computer tool actions
+  if (name === "computer") {
+    const action = input.action as string;
+    const coord = input.coordinate as [number, number] | undefined;
+    const text = input.text as string | undefined;
+
+    switch (action) {
+      case "screenshot":
+        return "Took screenshot";
+      case "mouse_move":
+        return coord ? `Moved mouse to (${coord[0]}, ${coord[1]})` : "Moved mouse";
+      case "left_click":
+        return coord ? `Clicked at (${coord[0]}, ${coord[1]})` : "Left clicked";
+      case "right_click":
+        return "Right clicked";
+      case "double_click":
+        return coord ? `Double clicked at (${coord[0]}, ${coord[1]})` : "Double clicked";
+      case "type":
+        if (text) {
+          const preview = text.length > 30 ? `${text.slice(0, 30)}...` : text;
+          return `Typed: "${preview}"`;
+        }
+        return "Typed text";
+      case "key":
+        return text ? `Pressed key: ${text}` : "Pressed key";
+      case "scroll": {
+        const dir = input.scroll_direction as string || "down";
+        return `Scrolled ${dir}`;
+      }
+      case "wait":
+        return "Waited";
+      default:
+        return action;
+    }
+  }
+
+  // browser tool actions
+  switch (name) {
+    case "take_snapshot":
+      return "Took snapshot";
+    case "click": {
+      const dbl = input.dblClick as boolean;
+      return dbl ? "Double clicked" : "Clicked";
+    }
+    case "hover":
+      return "Hovered";
+    case "fill": {
+      const val = input.value as string | undefined;
+      if (val) {
+        const preview = val.length > 20 ? `${val.slice(0, 20)}...` : val;
+        return `Filled: "${preview}"`;
+      }
+      return "Filled field";
+    }
+    case "press_key": {
+      const key = input.key as string | undefined;
+      return key ? `Pressed ${key}` : "Pressed key";
+    }
+    case "navigate_page": {
+      const type = input.type as string | undefined;
+      switch (type) {
+        case "goto": {
+          const url = input.url as string | undefined;
+          if (url) {
+            return `Navigated to ||${url}||`;
+          }
+          return "Navigated";
+        }
+        case "back":
+          return "Went back";
+        case "forward":
+          return "Went forward";
+        case "reload":
+          return "Reloaded page";
+        default:
+          return "Navigated";
+      }
+    }
+    case "wait_for": {
+      const text = input.text as string | undefined;
+      if (text) {
+        const preview = text.length > 20 ? `${text.slice(0, 20)}...` : text;
+        return `Waited for "${preview}"`;
+      }
+      return "Waited";
+    }
+    case "new_page": {
+      const url = input.url as string | undefined;
+      if (url) {
+        return `Opened new tab ||${url}||`;
+      }
+      return "Opened new tab";
+    }
+    case "list_pages":
+      return "Listed tabs";
+    case "select_page": {
+      const idx = input.pageIdx as number | undefined;
+      return idx !== undefined ? `Switched to tab ${idx}` : "Switched tab";
+    }
+    case "close_page": {
+      const idx = input.pageIdx as number | undefined;
+      return idx !== undefined ? `Closed tab ${idx}` : "Closed tab";
+    }
+    case "drag":
+      return "Dragged";
+    case "fill_form":
+      return "Filled form";
+    case "handle_dialog": {
+      const action = input.action as string | undefined;
+      switch (action) {
+        case "accept":
+          return "Accepted dialog";
+        case "dismiss":
+          return "Dismissed dialog";
+        default:
+          return "Handled dialog";
+      }
+    }
+    case "screenshot":
+      return "Took screenshot";
+    case "upload_file":
+      return "Uploaded file";
+    default:
+      // fallback: convert snake_case to readable
+      return name.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+}
 
 interface ChatViewProps {
   variant: "sidebar" | "spotlight" | "mini";
@@ -146,27 +310,106 @@ function ScreenshotBlock({ msg }: { msg: ChatMessage }) {
   );
 }
 
+// render content with embedded URLs as clickable links
+function renderContentWithUrls(content: string): React.ReactNode {
+  const urlPattern = /\|\|(.+?)\|\|/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = urlPattern.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index));
+    }
+    parts.push(<UrlLink key={match.index} url={match[1]} />);
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? <>{parts}</> : content;
+}
+
 function formatActionContent(msg: ChatMessage): React.ReactNode {
   const action = msg.action;
-  if (!action) return msg.content;
+
+  // handle browser tools (no action object, content has the formatted text)
+  if (!action) {
+    return renderContentWithUrls(msg.content);
+  }
 
   const coord = action.coordinate;
   const actionType = action.action;
+  const text = action.text;
 
-  if (actionType === "left_click" && coord) {
-    const label = msg.pending ? "Clicking" : "Clicked";
-    return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
-  }
-  if (actionType === "double_click" && coord) {
-    const label = msg.pending ? "Double clicking" : "Double clicked";
-    return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
-  }
-  if (actionType === "mouse_move" && coord) {
-    const label = msg.pending ? "Moving to" : "Moved to";
-    return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
-  }
+  // format computer actions with nice styling
+  switch (actionType) {
+    case "left_click":
+      if (coord) {
+        const label = msg.pending ? "Clicking" : "Clicked";
+        return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
+      }
+      return msg.pending ? "Clicking" : "Clicked";
 
-  return msg.content;
+    case "right_click":
+      return msg.pending ? "Right clicking" : "Right clicked";
+
+    case "middle_click":
+      return msg.pending ? "Middle clicking" : "Middle clicked";
+
+    case "double_click":
+      if (coord) {
+        const label = msg.pending ? "Double clicking" : "Double clicked";
+        return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
+      }
+      return msg.pending ? "Double clicking" : "Double clicked";
+
+    case "triple_click":
+      return msg.pending ? "Triple clicking" : "Triple clicked";
+
+    case "mouse_move":
+      if (coord) {
+        const label = msg.pending ? "Moving to" : "Moved to";
+        return <>{label} <sub className="text-[10px] opacity-60">({coord[0]}, {coord[1]})</sub></>;
+      }
+      return msg.pending ? "Moving mouse" : "Moved mouse";
+
+    case "left_click_drag":
+      if (action.start_coordinate && coord) {
+        const label = msg.pending ? "Dragging" : "Dragged";
+        return <>{label} <sub className="text-[10px] opacity-60">({action.start_coordinate[0]}, {action.start_coordinate[1]}) → ({coord[0]}, {coord[1]})</sub></>;
+      }
+      return msg.pending ? "Dragging" : "Dragged";
+
+    case "type":
+      if (text) {
+        const preview = text.length > 30 ? `${text.slice(0, 30)}...` : text;
+        return msg.pending ? `Typing: "${preview}"` : `Typed: "${preview}"`;
+      }
+      return msg.pending ? "Typing" : "Typed";
+
+    case "key":
+      if (text) {
+        return msg.pending ? `Pressing ${text}` : `Pressed ${text}`;
+      }
+      return msg.pending ? "Pressing key" : "Pressed key";
+
+    case "scroll": {
+      const dir = action.scroll_direction || "down";
+      return msg.pending ? `Scrolling ${dir}` : `Scrolled ${dir}`;
+    }
+
+    case "wait":
+      return msg.pending ? "Waiting" : "Waited";
+
+    case "screenshot":
+      return msg.pending ? "Taking screenshot" : "Took screenshot";
+
+    default:
+      return renderContentWithUrls(msg.content);
+  }
 }
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
@@ -185,11 +428,33 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     switch (msg.type) {
       case "action":
         const action = msg.action?.action;
+        const content = msg.content.toLowerCase();
+
+        // computer tool actions
         if (action?.includes("click") || action === "mouse_move" || action === "left_click_drag")
           return <MousePointer2 size={14} />;
         if (action === "type" || action === "key") return <Keyboard size={14} />;
         if (action === "scroll") return <ScrollText size={14} />;
         if (action === "wait") return <Clock size={14} />;
+
+        // browser tool actions (no action object, match on content)
+        if (!action) {
+          if (content.includes("snapshot")) return <Layers size={14} />;
+          if (content.includes("clicked") || content.includes("clicking")) return <MousePointerClick size={14} />;
+          if (content.includes("hover")) return <Hand size={14} />;
+          if (content.includes("filled") || content.includes("filling")) return <FormInput size={14} />;
+          if (content.includes("pressed")) return <Keyboard size={14} />;
+          if (content.includes("navigat") || content.includes("went back") || content.includes("went forward")) return <Navigation size={14} />;
+          if (content.includes("reload")) return <RotateCw size={14} />;
+          if (content.includes("waited")) return <Clock size={14} />;
+          if (content.includes("tab") || content.includes("page")) return <PanelTop size={14} />;
+          if (content.includes("dragged")) return <GripHorizontal size={14} />;
+          if (content.includes("dialog")) return <MessageCircle size={14} />;
+          if (content.includes("upload")) return <FileUp size={14} />;
+          if (content.includes("screenshot")) return <Camera size={14} />;
+          return <Eye size={14} />;
+        }
+
         return <MousePointer2 size={14} />;
       case "error":
         return <AlertCircle size={14} className="text-red-400" />;
@@ -269,30 +534,54 @@ function formatRelativeTime(timestamp: number): string {
 // convert anthropic api messages to chat messages for display
 function convertApiToChat(conversation: Conversation): ChatMessage[] {
   const chatMessages: ChatMessage[] = [];
+  // map tool_use_id -> index in chatMessages for attaching results
+  const toolUseIdToIndex: Map<string, number> = new Map();
 
   for (const msg of conversation.messages) {
-    // find first text block for main content
-    let mainText = "";
-    let screenshot: string | undefined;
-    let hasToolResult = false;
-
-    for (const block of msg.content) {
-      if (block.type === "text" && block.text) {
-        mainText = block.text;
-        break;
-      }
-      if (block.type === "image" && block.source?.data) {
-        screenshot = block.source.data;
-      }
-      if (block.type === "tool_result") {
-        hasToolResult = true;
-      }
-    }
-
     if (msg.role === "user") {
-      // skip tool result messages (they have role "user" but contain tool_result blocks)
-      if (hasToolResult) continue;
-      // skip empty user messages
+      // check if this is a tool result message
+      const toolResults = msg.content.filter(b => b.type === "tool_result");
+      if (toolResults.length > 0) {
+        // attach results to corresponding tool_use messages
+        for (const result of toolResults) {
+          const idx = toolUseIdToIndex.get(result.tool_use_id || "");
+          if (idx !== undefined && chatMessages[idx]) {
+            const targetMsg = chatMessages[idx];
+            // extract content from tool_result
+            for (const contentBlock of result.content || []) {
+              if (contentBlock.type === "text" && contentBlock.text) {
+                // bash output - parse exit code if present
+                if (targetMsg.type === "bash") {
+                  const match = contentBlock.text.match(/^exit code: (-?\d+)\n/);
+                  if (match) {
+                    targetMsg.exitCode = parseInt(match[1], 10);
+                    targetMsg.bashOutput = contentBlock.text.slice(match[0].length);
+                  } else {
+                    targetMsg.bashOutput = contentBlock.text;
+                  }
+                }
+              } else if (contentBlock.type === "image" && contentBlock.source?.data) {
+                // screenshot result
+                targetMsg.screenshot = contentBlock.source.data;
+              }
+            }
+          }
+        }
+        continue;
+      }
+
+      // regular user message
+      let mainText = "";
+      let screenshot: string | undefined;
+      for (const block of msg.content) {
+        if (block.type === "text" && block.text) {
+          mainText = block.text;
+          break;
+        }
+        if (block.type === "image" && block.source?.data) {
+          screenshot = block.source.data;
+        }
+      }
       if (!mainText && !screenshot) continue;
 
       chatMessages.push({
@@ -322,7 +611,10 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
           });
         } else if (block.type === "tool_use" && block.name) {
           const input = block.input as Record<string, unknown> | undefined;
+          const toolUseId = block.id;
+
           if (block.name === "bash" && input?.command) {
+            const idx = chatMessages.length;
             chatMessages.push({
               id: crypto.randomUUID(),
               role: "assistant",
@@ -331,26 +623,31 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
               type: "bash",
               pending: false,
             });
+            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
           } else if (block.name === "computer" && input?.action) {
+            const idx = chatMessages.length;
             chatMessages.push({
               id: crypto.randomUUID(),
               role: "assistant",
-              content: `${input.action}`,
+              content: formatActionForHistory("computer", input),
               timestamp: new Date(conversation.updated_at * 1000),
               type: "action",
               action: input as unknown as ChatMessage["action"],
               pending: false,
             });
+            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
           } else {
             // browser tools - show as action
+            const idx = chatMessages.length;
             chatMessages.push({
               id: crypto.randomUUID(),
               role: "assistant",
-              content: block.name,
+              content: formatActionForHistory(block.name, input || {}),
               timestamp: new Date(conversation.updated_at * 1000),
               type: "action",
               pending: false,
             });
+            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
           }
         }
       }
@@ -639,7 +936,7 @@ export default function ChatView({ variant }: ChatViewProps) {
               disabled={isRunning}
             />
           <div className="flex items-center gap-2">
-            {/* take over toggle - switches to computer mode */}
+            {/* hands off toggle - switches to computer mode */}
             <button
               onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
               disabled={isRunning}
@@ -650,8 +947,8 @@ export default function ChatView({ variant }: ChatViewProps) {
               } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
               title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
             >
-              <Monitor size={12} />
-              <span>Take over</span>
+              <Hand size={12} />
+              <span>Hands Off</span>
             </button>
             <select
               value={selectedModel}
