@@ -2,10 +2,11 @@ import { useEffect, useState, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, Send, X } from "lucide-react";
 import ChatView from "./components/ChatView";
 import { useAgent } from "./hooks/useAgent";
+import VoiceOrb from "./components/VoiceOrb";
 
 export default function MiniWindow() {
   const { submit } = useAgent();
@@ -15,10 +16,15 @@ export default function MiniWindow() {
   const [helpScreenshot, setHelpScreenshot] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // PTT state
+  const [pttRecording, setPttRecording] = useState(false);
+  const [pttInterim, setPttInterim] = useState("");
+  const [pttRetryMode, setPttRetryMode] = useState(false);
+
   // poll running state and resize window
   useEffect(() => {
-    // don't poll/resize while in help mode - backend handles help mode sizing
-    if (helpMode) return;
+    // don't poll/resize while in special modes - backend handles sizing
+    if (helpMode || pttRecording || pttRetryMode) return;
 
     const checkRunning = () => {
       invoke<boolean>("is_agent_running").then((running) => {
@@ -36,7 +42,7 @@ export default function MiniWindow() {
     checkRunning();
     const interval = setInterval(checkRunning, 500);
     return () => clearInterval(interval);
-  }, [helpMode]);
+  }, [helpMode, pttRecording, pttRetryMode]);
 
   useEffect(() => {
     const unlisten1 = listen("agent:started", () => {
@@ -57,12 +63,69 @@ export default function MiniWindow() {
       }
     });
 
+    // PTT recording state
+    const unlisten4 = listen<{ recording: boolean }>("ptt:recording", (e) => {
+      console.log("[ptt] recording:", e.payload.recording);
+      setPttRecording(e.payload.recording);
+      if (e.payload.recording) {
+        setPttInterim("");
+        setPttRetryMode(false);
+      }
+    });
+
+    // PTT interim transcription
+    const unlisten5 = listen<string>("ptt:interim", (e) => {
+      console.log("[ptt] interim:", e.payload);
+      setPttInterim(e.payload);
+    });
+
+    // PTT result - auto-submit or show retry
+    const unlisten6 = listen<{ text: string; screenshot: string | null }>("ptt:result", async (e) => {
+      console.log("[ptt] result:", e.payload);
+      setPttRecording(false);
+      setPttInterim("");
+
+      const { text, screenshot } = e.payload;
+
+      if (!text.trim()) {
+        // empty transcription - show retry mode
+        console.log("[ptt] empty transcription, showing retry");
+        setPttRetryMode(true);
+
+        // show mini window in retry mode
+        const win = getCurrentWindow();
+        await win.setSize(new LogicalSize(300, 300));
+        return;
+      }
+
+      // has transcription - auto-submit to spotlight
+      try {
+        await invoke("show_spotlight_window");
+        await new Promise((r) => setTimeout(r, 150));
+        await submit(text, screenshot ?? undefined);
+        await invoke("hide_mini_window");
+      } catch (err) {
+        console.error("[ptt] submit failed:", err);
+      }
+    });
+
+    // PTT error
+    const unlisten7 = listen<string>("ptt:error", (e) => {
+      console.error("[ptt] error:", e.payload);
+      setPttRecording(false);
+      setPttInterim("");
+    });
+
     return () => {
       unlisten1.then((f) => f());
       unlisten2.then((f) => f());
       unlisten3.then((f) => f());
+      unlisten4.then((f) => f());
+      unlisten5.then((f) => f());
+      unlisten6.then((f) => f());
+      unlisten7.then((f) => f());
     };
-  }, []);
+  }, [submit]);
 
   const handleOpenMain = async () => {
     try {
@@ -186,6 +249,83 @@ export default function MiniWindow() {
                 <span>Send</span>
               </button>
             </motion.div>
+          </motion.div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // PTT recording - orb with streaming text, fully transparent
+  if (pttRecording && !isRunning) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center"
+        >
+          <VoiceOrb isActive={true} volume={0.3} size={200} />
+
+          <AnimatePresence mode="wait">
+            {pttInterim ? (
+              <motion.div
+                key="interim"
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="mt-4 px-4 py-2.5 bg-black rounded-2xl"
+              >
+                <p className="text-white font-medium text-[14px] text-center max-w-[220px] leading-relaxed">
+                  {pttInterim}
+                </p>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="hint"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="mt-4 px-4 py-2 bg-black rounded-full"
+              >
+                <p className="text-white/90 text-[12px]">listening...</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // PTT retry mode - empty transcription, transparent with orb
+  if (pttRetryMode && !isRunning) {
+    const handleRetryCancel = async () => {
+      setPttRetryMode(false);
+      await invoke("show_mini_window");
+    };
+
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center"
+        >
+          <VoiceOrb isActive={false} volume={0} size={200} />
+
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 px-4 py-3 bg-black rounded-2xl text-center"
+          >
+            <p className="text-white/90 text-[13px] font-medium">No speech detected</p>
+            <p className="text-white/50 text-[11px] mt-1">Hold ⌘⇧V and speak</p>
+
+            <button
+              onClick={handleRetryCancel}
+              className="mt-3 px-4 py-1.5 bg-white/10 hover:bg-white/20 rounded-full text-white/70 text-[11px] transition-colors"
+            >
+              Dismiss
+            </button>
           </motion.div>
         </motion.div>
       </div>

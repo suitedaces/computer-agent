@@ -34,8 +34,11 @@ import {
   MessageCircle,
   Eye,
   GripHorizontal,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // url pill component showing domain and path
 function UrlLink({ url }: { url: string }) {
@@ -465,7 +468,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   const getBubbleStyle = () => {
     if (isUser) {
-      return "bg-blue-500/30 border-blue-400/30 px-3 py-2 rounded-2xl border backdrop-blur-sm";
+      return "bg-white/10 border-white/20 px-3 py-2 rounded-2xl border backdrop-blur-sm";
     }
     return "";
   };
@@ -859,12 +862,70 @@ export default function ChatView({ variant }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // voice state
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [voiceText, setVoiceText] = useState("");
+
   const isSpotlight = variant === "spotlight";
   const isMini = variant === "mini";
   const panelClass = isMini ? "mini-panel" : isSpotlight ? "spotlight-panel" : "app-panel";
   const padding = isMini ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
   const inputPadding = isMini ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
   const gifSize = isMini ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
+
+  // ref to track current input for voice append
+  const inputTextRef = useRef(inputText);
+  useEffect(() => { inputTextRef.current = inputText; }, [inputText]);
+
+  // voice event listeners
+  useEffect(() => {
+    const unlistenTranscription = listen<{ text: string; is_final: boolean }>("voice:transcription", (event) => {
+      const { text, is_final } = event.payload;
+      if (is_final) {
+        const current = inputTextRef.current;
+        setInputText(current ? current + " " + text : text);
+        setVoiceText("");
+      } else {
+        setVoiceText(text);
+      }
+    });
+
+    const unlistenStopped = listen("voice:stopped", () => {
+      setIsVoiceActive(false);
+      setVoiceText("");
+    });
+
+    const unlistenError = listen<string>("voice:error", (event) => {
+      console.error("[voice] error:", event.payload);
+      setIsVoiceActive(false);
+      setVoiceText("");
+    });
+
+    return () => {
+      unlistenTranscription.then((f) => f());
+      unlistenStopped.then((f) => f());
+      unlistenError.then((f) => f());
+    };
+  }, [setInputText]);
+
+  const toggleVoice = async () => {
+    console.log("[voice] toggleVoice called, isVoiceActive:", isVoiceActive);
+    if (isVoiceActive) {
+      console.log("[voice] stopping...");
+      await invoke("stop_voice");
+      setIsVoiceActive(false);
+      setVoiceText("");
+    } else {
+      try {
+        console.log("[voice] starting...");
+        await invoke("start_voice");
+        console.log("[voice] started successfully");
+        setIsVoiceActive(true);
+      } catch (e) {
+        console.error("[voice] failed to start:", e);
+      }
+    }
+  };
 
   // auto-scroll on new messages
   useEffect(() => {
@@ -893,6 +954,17 @@ export default function ChatView({ variant }: ChatViewProps) {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // resize textarea when voice text changes (onInput doesn't fire for programmatic changes)
+  // voiceText = interim, inputText gets final transcription
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.style.height = "24px";
+        inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 100) + "px";
+      }
+    });
+  }, [voiceText, inputText]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -936,20 +1008,6 @@ export default function ChatView({ variant }: ChatViewProps) {
               disabled={isRunning}
             />
           <div className="flex items-center gap-2">
-            {/* hands off toggle - switches to computer mode */}
-            <button
-              onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
-              disabled={isRunning}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] transition-colors border ${
-                selectedMode === "computer"
-                  ? "bg-orange-500/20 border-orange-400/40 text-orange-300"
-                  : "bg-white/5 border-white/10 text-white/40 hover:text-white/60 hover:border-white/20"
-              } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
-              title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
-            >
-              <Hand size={12} />
-              <span>Hands Off</span>
-            </button>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value as ModelId)}
@@ -1017,14 +1075,27 @@ export default function ChatView({ variant }: ChatViewProps) {
           </div>
         ) : (
           <div className="glass-card flex items-center gap-2 p-2">
+            <motion.button
+              onClick={toggleVoice}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                isVoiceActive
+                  ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
+                  : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+              }`}
+              title={isVoiceActive ? "Stop recording" : "Start voice input"}
+            >
+              {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
+            </motion.button>
             <textarea
               ref={inputRef}
-              value={inputText}
+              value={inputText + (voiceText ? (inputText ? " " : "") + voiceText : "")}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="what should I do?"
+              placeholder={isVoiceActive ? "listening..." : "what should I do?"}
               rows={1}
-              className="flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden"
+              className={`flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden ${isVoiceActive ? "italic" : ""}`}
               style={{ height: "24px" }}
               onInput={(e) => {
                 const target = e.target as HTMLTextAreaElement;
@@ -1033,13 +1104,27 @@ export default function ChatView({ variant }: ChatViewProps) {
               }}
             />
             <motion.button
+              onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={`shrink-0 h-8 px-2 rounded-xl flex items-center gap-1.5 transition-colors ${
+                selectedMode === "computer"
+                  ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
+                  : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+              }`}
+              title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
+            >
+              <MousePointerClick size={12} />
+              <span className="text-[9px]">Computer</span>
+            </motion.button>
+            <motion.button
               onClick={() => submit()}
               disabled={!inputText.trim()}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
                 inputText.trim()
-                  ? "bg-blue-500/30 border border-blue-400/30 text-blue-300"
+                  ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
                   : "bg-white/5 border border-white/10 text-white/20"
               }`}
             >
