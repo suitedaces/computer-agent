@@ -462,6 +462,7 @@ mod voice_cmd {
     pub struct PttState {
         pub session: Arc<PushToTalkSession>,
         pub screenshot: std::sync::Mutex<Option<String>>,
+        pub mode: std::sync::Mutex<Option<String>>,
     }
 
     #[tauri::command]
@@ -565,12 +566,26 @@ fn main() {
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV))
                 .unwrap()
+                .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyC))
+                .unwrap()
+                .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyB))
+                .unwrap()
                 .with_handler(move |app, shortcut, event| {
-                    // Cmd+Shift+V - push-to-talk (handles both press and release)
-                    if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyV) {
+                    // PTT shortcuts - V (current mode), Ctrl+Shift+C (computer), Ctrl+Shift+B (browser)
+                    let ptt_mode: Option<&str> = if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyV) {
+                        Some("current") // use whatever mode is selected in UI
+                    } else if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyC) {
+                        Some("computer")
+                    } else if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyB) {
+                        Some("browser")
+                    } else {
+                        None
+                    };
+
+                    if let Some(mode) = ptt_mode {
                         match event.state {
                             ShortcutState::Pressed => {
-                                println!("[ptt] Cmd+Shift+V pressed - starting recording");
+                                println!("[ptt] pressed - starting recording (mode: {})", mode);
 
                                 // capture screenshot first
                                 let screenshot = match computer::ComputerControl::new() {
@@ -608,6 +623,7 @@ fn main() {
                                 // start PTT recording via command
                                 let app_clone = app.clone();
                                 let screenshot_clone = screenshot.clone();
+                                let mode_str = mode.to_string();
                                 tauri::async_runtime::spawn(async move {
                                     if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
                                         let api_key = match std::env::var("DEEPGRAM_API_KEY") {
@@ -618,10 +634,11 @@ fn main() {
                                             }
                                         };
 
-                                        // store screenshot
+                                        // store screenshot and mode
                                         if let Some(ss) = screenshot_clone {
                                             *ptt_state.screenshot.lock().unwrap() = Some(ss);
                                         }
+                                        *ptt_state.mode.lock().unwrap() = Some(mode_str);
 
                                         if let Err(e) = ptt_state.session.start(api_key, app_clone.clone()).await {
                                             println!("[ptt] start error: {}", e);
@@ -631,7 +648,7 @@ fn main() {
                                 });
                             }
                             ShortcutState::Released => {
-                                println!("[ptt] Cmd+Shift+V released - stopping recording");
+                                println!("[ptt] released - stopping recording");
 
                                 // play recording stop sound
                                 #[cfg(target_os = "macos")]
@@ -642,22 +659,24 @@ fn main() {
                                         .ok();
                                 }
 
-// stop recording and get result
+                                // stop recording and get result
                                 let app_clone = app.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
                                         let text = ptt_state.session.stop().await;
                                         let screenshot = ptt_state.screenshot.lock().unwrap().take();
+                                        let mode = ptt_state.mode.lock().unwrap().take();
 
-                                        println!("[ptt] result: text='{}', screenshot={}", text, screenshot.is_some());
+                                        println!("[ptt] result: text='{}', screenshot={}, mode={:?}", text, screenshot.is_some(), mode);
 
                                         // emit recording=false right before result so UI doesn't flash to idle bar
                                         let _ = app_clone.emit("ptt:recording", serde_json::json!({ "recording": false }));
 
-                                        // emit result event
+                                        // emit result event with mode
                                         let _ = app_clone.emit("ptt:result", serde_json::json!({
                                             "text": text,
-                                            "screenshot": screenshot
+                                            "screenshot": screenshot,
+                                            "mode": mode
                                         }));
                                     }
                                 });
@@ -734,6 +753,7 @@ fn main() {
         .manage(voice_cmd::PttState {
             session: Arc::new(voice::PushToTalkSession::new()),
             screenshot: std::sync::Mutex::new(None),
+            mode: std::sync::Mutex::new(None),
         })
         .setup(|app| {
             // hide from dock - menubar app only

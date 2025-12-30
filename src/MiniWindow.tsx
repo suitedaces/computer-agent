@@ -80,12 +80,12 @@ export default function MiniWindow() {
     });
 
     // PTT result - auto-submit or show retry
-    const unlisten6 = listen<{ text: string; screenshot: string | null }>("ptt:result", async (e) => {
+    const unlisten6 = listen<{ text: string; screenshot: string | null; mode: string | null }>("ptt:result", async (e) => {
       console.log("[ptt] result:", e.payload);
       setPttRecording(false);
       setPttInterim("");
 
-      const { text, screenshot } = e.payload;
+      const { text, screenshot, mode } = e.payload;
 
       if (!text.trim()) {
         // empty transcription - show retry mode
@@ -102,7 +102,9 @@ export default function MiniWindow() {
       try {
         await invoke("show_spotlight_window");
         await new Promise((r) => setTimeout(r, 150));
-        await submit(text, screenshot ?? undefined);
+        // pass mode override if not "current" (which means use UI selection)
+        const modeOverride = mode && mode !== "current" ? mode : undefined;
+        await submit(text, screenshot ?? undefined, modeOverride);
         await invoke("hide_mini_window");
       } catch (err) {
         console.error("[ptt] submit failed:", err);

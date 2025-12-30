@@ -144,7 +144,7 @@ export function useAgent() {
     };
   }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking, setConversationId]);
 
-  const submit = useCallback(async (overrideText?: string, contextScreenshot?: string) => {
+  const submit = useCallback(async (overrideText?: string, contextScreenshot?: string, overrideMode?: string) => {
     const text = (overrideText ?? inputText).trim();
     if (!text || isRunning) return;
 
@@ -156,8 +156,11 @@ export function useAgent() {
     // clear input before invoking (user message comes from backend via user_message event)
     if (!overrideText) setInputText("");
 
+    // use override mode if provided, otherwise use selected mode
+    const mode = overrideMode ?? selectedMode;
+
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
     } catch (error) {
       // on early failure, show the user message so they know what failed
       addMessage({ role: "user", content: text });
