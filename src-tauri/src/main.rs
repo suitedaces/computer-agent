@@ -587,11 +587,9 @@ fn main() {
                             ShortcutState::Pressed => {
                                 println!("[ptt] pressed - starting recording (mode: {})", mode);
 
-                                // capture screenshot first
-                                let screenshot = match computer::ComputerControl::new() {
-                                    Ok(control) => control.take_screenshot().ok(),
-                                    Err(_) => None,
-                                };
+                                // capture screenshot first (excluding app windows)
+                                // use _sync version since shortcut handlers run on main thread
+                                let screenshot = panels::take_screenshot_excluding_app_sync().ok();
 
                                 // play recording start sound
                                 #[cfg(target_os = "macos")]
@@ -692,11 +690,9 @@ fn main() {
 
                     // Cmd+Shift+H - help mode (screenshot + prompt)
                     if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyH) {
-                        // capture screenshot first (before showing any UI)
-                        let screenshot = match computer::ComputerControl::new() {
-                            Ok(control) => control.take_screenshot().ok(),
-                            Err(_) => None,
-                        };
+                        // capture screenshot first (excluding app windows)
+                        // use _sync version since shortcut handlers run on main thread
+                        let screenshot = panels::take_screenshot_excluding_app_sync().ok();
 
                         // play shutter sound
                         #[cfg(target_os = "macos")]
