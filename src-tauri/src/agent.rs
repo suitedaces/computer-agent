@@ -96,10 +96,11 @@ impl Agent {
         mode: AgentMode,
         history: Vec<HistoryMessage>,
         context_screenshot: Option<String>,
+        conversation_id: Option<String>,
         app_handle: AppHandle,
     ) -> Result<(), AgentError> {
-        println!("[agent] run() starting with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {})",
-            instructions, model, mode, history.len(), context_screenshot.is_some());
+        println!("[agent] run() starting with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {}, conv: {:?})",
+            instructions, model, mode, history.len(), context_screenshot.is_some(), conversation_id);
 
         let api_key = self.api_key.clone().ok_or(AgentError::NoApiKey)?;
         println!("[agent] API key present");
@@ -166,17 +167,48 @@ impl Agent {
         let client = AnthropicClient::new(api_key, model.clone());
         let mut messages: Vec<Message> = Vec::new();
 
-        // create conversation for storage
+        // load existing conversation or create new one
         let mode_str = match mode {
             AgentMode::Computer => "computer",
             AgentMode::Browser => "browser",
         };
-        let mut conversation = Conversation::new(
-            uuid::Uuid::new_v4().to_string(),
-            "New Conversation".to_string(),
-            model.clone(),
-            mode_str.to_string(),
-        );
+        let mut conversation = if let Some(ref conv_id) = conversation_id {
+            // try to load existing conversation
+            match storage::load_conversation(conv_id) {
+                Ok(Some(conv)) => {
+                    println!("[agent] Loaded existing conversation: {}", conv_id);
+                    conv
+                }
+                Ok(None) => {
+                    println!("[agent] Conversation {} not found, creating new", conv_id);
+                    Conversation::new(
+                        uuid::Uuid::new_v4().to_string(),
+                        "New Conversation".to_string(),
+                        model.clone(),
+                        mode_str.to_string(),
+                    )
+                }
+                Err(e) => {
+                    println!("[agent] Failed to load conversation {}: {}, creating new", conv_id, e);
+                    Conversation::new(
+                        uuid::Uuid::new_v4().to_string(),
+                        "New Conversation".to_string(),
+                        model.clone(),
+                        mode_str.to_string(),
+                    )
+                }
+            }
+        } else {
+            Conversation::new(
+                uuid::Uuid::new_v4().to_string(),
+                "New Conversation".to_string(),
+                model.clone(),
+                mode_str.to_string(),
+            )
+        };
+
+        // emit conversation id to frontend
+        let _ = app_handle.emit("agent:conversation_id", &conversation.id);
 
         // emit started to all windows with mode
         self.emit_full(&app_handle, "started", "Agent started", None, None, None, Some(mode_str.to_string()));

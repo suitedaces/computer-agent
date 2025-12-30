@@ -123,11 +123,12 @@ async fn run_agent(
     mode: AgentMode,
     history: Vec<HistoryMessage>,
     context_screenshot: Option<String>,
+    conversation_id: Option<String>,
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {})",
-        instructions, model, mode, history.len(), context_screenshot.is_some());
+    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {}, conv: {:?})",
+        instructions, model, mode, history.len(), context_screenshot.is_some(), conversation_id);
 
     let agent = state.agent.clone();
 
@@ -143,7 +144,7 @@ async fn run_agent(
 
     tokio::spawn(async move {
         let agent_guard = agent.lock().await;
-        match agent_guard.run(instructions, model, mode, history, context_screenshot, app_handle).await {
+        match agent_guard.run(instructions, model, mode, history, context_screenshot, conversation_id, app_handle).await {
             Ok(_) => println!("[taskhomie] Agent finished"),
             Err(e) => println!("[taskhomie] Agent error: {:?}", e),
         }

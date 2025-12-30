@@ -684,6 +684,9 @@ pub async fn restart_chrome_with_debugging() -> Result<BrowserClient> {
             "--args",
             "--remote-debugging-port=9222",
             &format!("--user-data-dir={}", user_data_dir),
+            "--profile-directory=Default",
+            "--no-first-run",
+            "--no-default-browser-check",
         ])
         .spawn()
         .context("failed to launch Chrome")?;

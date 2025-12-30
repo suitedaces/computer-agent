@@ -88,6 +88,7 @@ export interface AgentState {
   selectedMode: AgentMode;
   streamingText: string;
   streamingThinking: string;
+  conversationId: string | null;
 
   setIsRunning: (running: boolean) => void;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
@@ -103,4 +104,5 @@ export interface AgentState {
   clearStreamingText: () => void;
   appendStreamingThinking: (text: string) => void;
   clearStreamingThinking: () => void;
+  setConversationId: (id: string | null) => void;
 }

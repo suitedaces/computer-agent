@@ -462,7 +462,7 @@ Use screenshot when:
 Use bash for file operations.
 
 If browser tools fail with connection errors, Chrome may have been closed. Run this bash command to relaunch it with debugging enabled:
-open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.taskhomie-chrome"
+open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.taskhomie-chrome" --profile-directory=Default --no-first-run
 Then wait a few seconds and retry the browser tool."#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {

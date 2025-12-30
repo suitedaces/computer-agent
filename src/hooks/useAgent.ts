@@ -11,6 +11,7 @@ export function useAgent() {
     selectedModel,
     selectedMode,
     messages,
+    conversationId,
     setIsRunning,
     addMessage,
     markLastActionComplete,
@@ -21,6 +22,7 @@ export function useAgent() {
     clearStreamingText,
     appendStreamingThinking,
     clearStreamingThinking,
+    setConversationId,
   } = useAgentStore();
 
   // setup event listener
@@ -130,11 +132,17 @@ export function useAgent() {
       }
     });
 
+    // conversation id listener
+    const unlistenConvIdPromise = listen<string>("agent:conversation_id", (event) => {
+      setConversationId(event.payload);
+    });
+
     return () => {
       unlistenPromise.then((fn) => fn());
       unlistenStreamPromise.then((fn) => fn());
+      unlistenConvIdPromise.then((fn) => fn());
     };
-  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking]);
+  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking, setConversationId]);
 
   const submit = useCallback(async (overrideText?: string, contextScreenshot?: string) => {
     const text = (overrideText ?? inputText).trim();
@@ -149,14 +157,14 @@ export function useAgent() {
     if (!overrideText) setInputText("");
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: contextScreenshot ?? null });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode: selectedMode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
     } catch (error) {
       // on early failure, show the user message so they know what failed
       addMessage({ role: "user", content: text });
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, selectedModel, selectedMode, messages, addMessage, setInputText, setIsRunning]);
+  }, [inputText, isRunning, selectedModel, selectedMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {

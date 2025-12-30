@@ -58,6 +58,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   selectedMode: "browser" as AgentMode,
   streamingText: "",
   streamingThinking: "",
+  conversationId: null,
 
   setIsRunning: (running) => set({ isRunning: running }),
 
@@ -107,7 +108,7 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   setSelectedMode: (selectedMode) => set({ selectedMode }),
 
-  clearMessages: () => set({ messages: [] }),
+  clearMessages: () => set({ messages: [], conversationId: null }),
 
   setMessages: (messages) => set({ messages }),
 
@@ -122,4 +123,6 @@ export const useAgentStore = create<AgentState>((set) => ({
   })),
 
   clearStreamingThinking: () => set({ streamingThinking: "" }),
+
+  setConversationId: (id) => set({ conversationId: id }),
 }));
