@@ -955,6 +955,17 @@ export default function ChatView({ variant }: ChatViewProps) {
     inputRef.current?.focus();
   }, []);
 
+  // resize textarea when voice text changes (onInput doesn't fire for programmatic changes)
+  // voiceText = interim, inputText gets final transcription
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.style.height = "24px";
+        inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 100) + "px";
+      }
+    });
+  }, [voiceText, inputText]);
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

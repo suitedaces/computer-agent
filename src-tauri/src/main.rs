@@ -587,6 +587,21 @@ fn main() {
                                         .ok();
                                 }
 
+                                // resize mini window to show recording indicator (compact, expands with text)
+                                #[cfg(target_os = "macos")]
+                                if let Some(panel) = MINI_PANEL.get() {
+                                    if let Some(window) = app.get_webview_window("mini") {
+                                        let _ = window.set_size(tauri::LogicalSize::new(320.0, 120.0));
+                                        position_window_center(&window, 320.0, 120.0);
+                                    }
+                                    panel.show();
+                                }
+                                #[cfg(not(target_os = "macos"))]
+                                if let Some(window) = app.get_webview_window("mini") {
+                                    let _ = window.set_size(tauri::LogicalSize::new(320.0, 120.0));
+                                    let _ = window.show();
+                                }
+
                                 // emit event to show recording indicator
                                 let _ = app.emit("ptt:recording", serde_json::json!({ "recording": true }));
 

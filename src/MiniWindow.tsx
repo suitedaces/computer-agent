@@ -23,8 +23,8 @@ export default function MiniWindow() {
 
   // poll running state and resize window
   useEffect(() => {
-    // don't poll/resize while in help mode - backend handles help mode sizing
-    if (helpMode) return;
+    // don't poll/resize while in special modes - backend handles sizing
+    if (helpMode || pttRecording || pttRetryMode) return;
 
     const checkRunning = () => {
       invoke<boolean>("is_agent_running").then((running) => {
@@ -42,7 +42,7 @@ export default function MiniWindow() {
     checkRunning();
     const interval = setInterval(checkRunning, 500);
     return () => clearInterval(interval);
-  }, [helpMode]);
+  }, [helpMode, pttRecording, pttRetryMode]);
 
   useEffect(() => {
     const unlisten1 = listen("agent:started", () => {
@@ -259,26 +259,33 @@ export default function MiniWindow() {
   // PTT recording indicator overlay
   if (pttRecording && !isRunning) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center p-4 bg-black/60">
+      <div className="h-screen w-screen flex flex-col items-center justify-center p-4 bg-black/60">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center gap-3"
+          className="w-full max-w-[280px] bg-zinc-900/95 rounded-xl border border-red-500/30 p-4"
         >
-          <motion.div
-            animate={{ scale: [1, 1.2, 1] }}
-            transition={{ repeat: Infinity, duration: 1.5 }}
-            className="w-16 h-16 rounded-full bg-red-500/30 border-2 border-red-400 flex items-center justify-center"
-          >
-            <Mic size={28} className="text-red-400" />
-          </motion.div>
-          <span className="text-white/80 text-sm">Recording...</span>
+          <div className="flex items-center gap-3 mb-2">
+            <motion.div
+              animate={{ scale: [1, 1.15, 1] }}
+              transition={{ repeat: Infinity, duration: 1.2 }}
+              className="w-10 h-10 rounded-full bg-red-500/30 border border-red-400 flex items-center justify-center flex-shrink-0"
+            >
+              <Mic size={18} className="text-red-400" />
+            </motion.div>
+            <div className="flex-1 min-w-0">
+              <span className="text-white/80 text-sm font-medium">Recording...</span>
+              <div className="text-white/30 text-[10px]">Release to send</div>
+            </div>
+          </div>
+
           {pttInterim && (
-            <span className="text-white/50 text-xs max-w-[200px] text-center truncate">
-              {pttInterim}
-            </span>
+            <div className="mt-2 p-2 bg-white/5 rounded-lg border border-white/10">
+              <p className="text-white/70 text-sm leading-relaxed break-words">
+                {pttInterim}
+              </p>
+            </div>
           )}
-          <span className="text-white/30 text-[10px]">Release Cmd+Shift+V to send</span>
         </motion.div>
       </div>
     );
