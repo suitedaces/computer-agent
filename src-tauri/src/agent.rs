@@ -530,26 +530,55 @@ impl Agent {
 
                             let mut browser_guard = self.browser_client.lock().await;
                             if let Some(ref mut browser) = *browser_guard {
-                                let result = execute_browser_tool(browser, name, input).await;
-                                match result {
-                                    Ok(output) => {
-                                        println!("[agent] Browser tool success ({} chars): {}...", output.len(), &output[..output.len().min(200)]);
-                                        self.emit(&app_handle, "browser_result", &output, None, None);
-                                        tool_results.push(ContentBlock::ToolResult {
-                                            tool_use_id: id.clone(),
-                                            content: vec![ToolResultContent::Text { text: output }],
-                                        });
+                                // screenshot returns image, other tools return text
+                                if name == "screenshot" {
+                                    match browser.screenshot().await {
+                                        Ok(base64_data) => {
+                                            println!("[agent] Browser screenshot captured ({} bytes)", base64_data.len());
+                                            self.emit(&app_handle, "screenshot", "Browser screenshot", None, Some(base64_data.clone()));
+                                            tool_results.push(ContentBlock::ToolResult {
+                                                tool_use_id: id.clone(),
+                                                content: vec![ToolResultContent::Image {
+                                                    source: ImageSource {
+                                                        source_type: "base64".to_string(),
+                                                        media_type: "image/jpeg".to_string(),
+                                                        data: base64_data,
+                                                    },
+                                                }],
+                                            });
+                                        }
+                                        Err(e) => {
+                                            let err_msg = format!("Screenshot error: {}", e);
+                                            println!("[agent] Browser screenshot failed: {}", err_msg);
+                                            self.emit(&app_handle, "browser_result", &err_msg, None, None);
+                                            tool_results.push(ContentBlock::ToolResult {
+                                                tool_use_id: id.clone(),
+                                                content: vec![ToolResultContent::Text { text: err_msg }],
+                                            });
+                                        }
                                     }
-                                    Err(e) => {
-                                        let err_msg = format!("Browser error: {}", e);
-                                        println!("[agent] Browser tool failed: {}", err_msg);
-                                        // emit browser_result not error - tool failures are expected
-                                        // (e.g. wait_for timeouts) and the model handles them gracefully
-                                        self.emit(&app_handle, "browser_result", &err_msg, None, None);
-                                        tool_results.push(ContentBlock::ToolResult {
-                                            tool_use_id: id.clone(),
-                                            content: vec![ToolResultContent::Text { text: err_msg }],
-                                        });
+                                } else {
+                                    let result = execute_browser_tool(browser, name, input).await;
+                                    match result {
+                                        Ok(output) => {
+                                            println!("[agent] Browser tool success ({} chars): {}...", output.len(), &output[..output.len().min(200)]);
+                                            self.emit(&app_handle, "browser_result", &output, None, None);
+                                            tool_results.push(ContentBlock::ToolResult {
+                                                tool_use_id: id.clone(),
+                                                content: vec![ToolResultContent::Text { text: output }],
+                                            });
+                                        }
+                                        Err(e) => {
+                                            let err_msg = format!("Browser error: {}", e);
+                                            println!("[agent] Browser tool failed: {}", err_msg);
+                                            // emit browser_result not error - tool failures are expected
+                                            // (e.g. wait_for timeouts) and the model handles them gracefully
+                                            self.emit(&app_handle, "browser_result", &err_msg, None, None);
+                                            tool_results.push(ContentBlock::ToolResult {
+                                                tool_use_id: id.clone(),
+                                                content: vec![ToolResultContent::Text { text: err_msg }],
+                                            });
+                                        }
                                     }
                                 }
                             } else {
@@ -794,6 +823,7 @@ const BROWSER_TOOLS: &[&str] = &[
     "select_page",
     "close_page",
     "handle_dialog",
+    "screenshot",
 ];
 
 fn is_browser_tool(name: &str) -> bool {
@@ -879,6 +909,7 @@ fn format_browser_action(name: &str, input: &serde_json::Value) -> String {
                 _ => "Handling dialog".to_string(),
             }
         }
+        "screenshot" => "Taking screenshot".to_string(),
         _ => format!("Browser: {}", name),
     }
 }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::accessibility::{
     AxNode, AxPropertyName, GetFullAxTreeParams,
@@ -15,8 +16,10 @@ use chromiumoxide::cdp::browser_protocol::input::{
     DispatchMouseEventType, MouseButton,
 };
 use chromiumoxide::cdp::browser_protocol::page::{
-    CloseParams, HandleJavaScriptDialogParams, NavigateParams, ReloadParams,
+    CaptureScreenshotFormat, CloseParams, HandleJavaScriptDialogParams, NavigateParams,
+    ReloadParams,
 };
+use chromiumoxide::page::ScreenshotParams;
 use chromiumoxide::handler::Handler;
 use chromiumoxide::Page;
 use futures::StreamExt;
@@ -549,6 +552,19 @@ impl BrowserClient {
 
         let action = if accept { "accepted" } else { "dismissed" };
         Ok(format!("Successfully {action} dialog"))
+    }
+
+    // tool: screenshot - capture page as base64 jpeg
+    pub async fn screenshot(&self) -> Result<String> {
+        let page = self.selected_page()?;
+
+        let params = ScreenshotParams::builder()
+            .format(CaptureScreenshotFormat::Jpeg)
+            .quality(60)
+            .build();
+
+        let bytes = page.screenshot(params).await?;
+        Ok(BASE64.encode(&bytes))
     }
 
     // helper: get backend node id from uid

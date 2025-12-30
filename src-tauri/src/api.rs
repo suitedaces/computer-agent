@@ -453,6 +453,12 @@ Keep text responses very concise. Focus on doing, not explaining. Use tools on e
 
 Start every task with take_snapshot to see the page. Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
 
+Use screenshot when:
+- You're stuck or something isn't working as expected
+- You need to verify a visual result after an action
+- Dealing with CAPTCHAs, images, or visual elements not in the a11y tree
+- Confirming the page looks correct before reporting success
+
 Use bash for file operations.
 
 If browser tools fail with connection errors, Chrome may have been closed. Run this bash command to relaunch it with debugging enabled:
@@ -623,6 +629,15 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
                     "promptText": { "type": "string", "description": "Text for prompt dialogs" }
                 },
                 "required": ["action"]
+            }
+        }),
+        serde_json::json!({
+            "name": "screenshot",
+            "description": "Capture a screenshot of the current page. Use when stuck, for visual verification, or to see CAPTCHAs and other visual elements not in the a11y tree.",
+            "input_schema": {
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         }),
     ]
