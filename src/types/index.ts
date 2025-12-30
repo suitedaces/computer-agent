@@ -34,6 +34,51 @@ export type ModelId = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5" | "claud
 
 export type AgentMode = "computer" | "browser";
 
+export interface ConversationMeta {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  model: string;
+  mode: string;
+  message_count: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+// anthropic api content block format
+export interface ContentBlock {
+  type: "text" | "image" | "tool_use" | "tool_result" | "thinking" | "redacted_thinking";
+  text?: string;
+  source?: { type: string; media_type: string; data: string };
+  id?: string;
+  name?: string;
+  input?: unknown;
+  tool_use_id?: string;
+  content?: ContentBlock[];
+  thinking?: string;
+  signature?: string;
+  data?: string;
+}
+
+export interface ApiMessage {
+  role: "user" | "assistant";
+  content: ContentBlock[];
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  model: string;
+  mode: string;
+  messages: ApiMessage[];
+  turn_usage: unknown[];
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
 export interface AgentState {
   isRunning: boolean;
   messages: ChatMessage[];
@@ -53,6 +98,7 @@ export interface AgentState {
   setSelectedModel: (model: ModelId) => void;
   setSelectedMode: (mode: AgentMode) => void;
   clearMessages: () => void;
+  setMessages: (messages: ChatMessage[]) => void;
   appendStreamingText: (text: string) => void;
   clearStreamingText: () => void;
   appendStreamingThinking: (text: string) => void;

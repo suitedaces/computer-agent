@@ -1,4 +1,5 @@
 use crate::agent::AgentMode;
+use crate::storage::Usage;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -120,6 +121,13 @@ pub enum StreamEvent {
     MessageStop,
 }
 
+// api call result with content and usage
+#[derive(Debug)]
+pub struct ApiResult {
+    pub content: Vec<ContentBlock>,
+    pub usage: Usage,
+}
+
 pub struct AnthropicClient {
     client: Client,
     api_key: String,
@@ -169,7 +177,7 @@ impl AnthropicClient {
         messages: Vec<Message>,
         event_tx: mpsc::UnboundedSender<StreamEvent>,
         mode: AgentMode,
-    ) -> Result<Vec<ContentBlock>, ApiError> {
+    ) -> Result<ApiResult, ApiError> {
         let system = match mode {
             AgentMode::Computer => SYSTEM_PROMPT.to_string(),
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
@@ -222,6 +230,9 @@ impl AnthropicClient {
         let mut block_types: Vec<String> = Vec::new(); // track block type per index
         let mut buffer = String::new();
 
+        // track usage from SSE events
+        let mut usage = Usage::default();
+
         let mut stream = response.bytes_stream();
 
         while let Some(chunk_result) = stream.next().await {
@@ -242,6 +253,32 @@ impl AnthropicClient {
                     let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                     match event_type {
+                        "message_start" => {
+                            // capture input token usage from message_start
+                            if let Some(message) = event.get("message") {
+                                if let Some(u) = message.get("usage") {
+                                    usage.input_tokens = u.get("input_tokens")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0) as u32;
+                                    usage.cache_creation_input_tokens = u.get("cache_creation_input_tokens")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0) as u32;
+                                    usage.cache_read_input_tokens = u.get("cache_read_input_tokens")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0) as u32;
+                                }
+                            }
+                        }
+
+                        "message_delta" => {
+                            // capture output token usage from message_delta (cumulative)
+                            if let Some(u) = event.get("usage") {
+                                usage.output_tokens = u.get("output_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0) as u32;
+                            }
+                        }
+
                         "content_block_start" => {
                             let index = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
                             if let Some(block) = event.get("content_block") {
@@ -393,7 +430,10 @@ impl AnthropicClient {
             }
         }
 
-        Ok(content_blocks)
+        Ok(ApiResult {
+            content: content_blocks,
+            usage,
+        })
     }
 }
 

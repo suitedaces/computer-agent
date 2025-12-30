@@ -1,4 +1,5 @@
 use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, StreamEvent, ToolResultContent};
+use crate::storage::{self, Conversation};
 use crate::bash::BashExecutor;
 use crate::browser::{BrowserClient, SharedBrowserClient};
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
@@ -162,14 +163,22 @@ impl Agent {
             }
         }
 
-        let client = AnthropicClient::new(api_key, model);
+        let client = AnthropicClient::new(api_key, model.clone());
         let mut messages: Vec<Message> = Vec::new();
 
-        // emit started to all windows with mode
+        // create conversation for storage
         let mode_str = match mode {
             AgentMode::Computer => "computer",
             AgentMode::Browser => "browser",
         };
+        let mut conversation = Conversation::new(
+            uuid::Uuid::new_v4().to_string(),
+            "New Conversation".to_string(),
+            model.clone(),
+            mode_str.to_string(),
+        );
+
+        // emit started to all windows with mode
         self.emit_full(&app_handle, "started", "Agent started", None, None, None, Some(mode_str.to_string()));
         let _ = app_handle.emit("agent:started", ());
 
@@ -218,10 +227,12 @@ impl Agent {
             text: instructions.clone(),
         });
 
-        messages.push(Message {
+        let user_message = Message {
             role: "user".to_string(),
             content: user_content,
-        });
+        };
+        messages.push(user_message.clone());
+        conversation.add_message(user_message);
 
         // agent loop - limit iterations to prevent runaway tasks.
         // 50 is enough for complex multi-step tasks while providing a safety bound
@@ -267,10 +278,10 @@ impl Agent {
                 }
             });
 
-            let response_content = match client.send_message_streaming(messages.clone(), event_tx, mode).await {
-                Ok(content) => {
-                    println!("[agent] API streaming response complete, {} blocks", content.len());
-                    content
+            let api_result = match client.send_message_streaming(messages.clone(), event_tx, mode).await {
+                Ok(result) => {
+                    println!("[agent] API streaming response complete, {} blocks, usage: {:?}", result.content.len(), result.usage);
+                    result
                 }
                 Err(e) => {
                     println!("[agent] API error: {:?}", e);
@@ -278,15 +289,19 @@ impl Agent {
                     break;
                 }
             };
+            let response_content = api_result.content;
 
             // wait for stream consumer to finish
             let _ = stream_task.await;
 
             // add assistant response to history
-            messages.push(Message {
+            let assistant_message = Message {
                 role: "assistant".to_string(),
                 content: response_content.clone(),
-            });
+            };
+            messages.push(assistant_message.clone());
+            conversation.add_message(assistant_message);
+            conversation.add_usage(api_result.usage.clone(), &model);
 
             let mut tool_results: Vec<ContentBlock> = Vec::new();
 
@@ -587,13 +602,30 @@ impl Agent {
                 summarize_old_snapshots(&mut messages);
             }
 
-            messages.push(Message {
+            let tool_result_message = Message {
                 role: "user".to_string(),
                 content: tool_results,
-            });
+            };
+            messages.push(tool_result_message.clone());
+            conversation.add_message(tool_result_message);
         }
 
         self.running.store(false, Ordering::SeqCst);
+
+        // save conversation if we have any messages
+        if !conversation.messages.is_empty() {
+            conversation.auto_title();
+            if let Err(e) = storage::save_conversation(&conversation) {
+                println!("[agent] Failed to save conversation: {}", e);
+            } else {
+                println!("[agent] Saved conversation {} ({} msgs, {} input, {} output tokens)",
+                    conversation.id,
+                    conversation.messages.len(),
+                    conversation.total_input_tokens,
+                    conversation.total_output_tokens
+                );
+            }
+        }
         let _ = app_handle.emit("agent:stopped", ());
 
         // emit border hide for frontend to call IPC command

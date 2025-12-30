@@ -30,7 +30,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   apiKeySet: false,
   inputText: "",
   selectedModel: "claude-haiku-4-5-20251001" as ModelId,
-  selectedMode: "computer" as AgentMode,
+  selectedMode: "browser" as AgentMode,
   streamingText: "",
   streamingThinking: "",
 
@@ -83,6 +83,8 @@ export const useAgentStore = create<AgentState>((set) => ({
   setSelectedMode: (selectedMode) => set({ selectedMode }),
 
   clearMessages: () => set({ messages: [] }),
+
+  setMessages: (messages) => set({ messages }),
 
   appendStreamingText: (text) => set((state) => ({
     streamingText: state.streamingText + text,

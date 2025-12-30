@@ -4,3 +4,4 @@ pub mod bash;
 pub mod browser;
 pub mod computer;
 pub mod panels;
+pub mod storage;
