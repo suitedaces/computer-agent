@@ -1,7 +1,7 @@
 use crate::api::{AnthropicClient, ApiError, ContentBlock, ImageSource, Message, StreamEvent, ToolResultContent};
 use crate::bash::BashExecutor;
+use crate::browser::{BrowserClient, SharedBrowserClient};
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
-use crate::mcp::{McpClient, McpError, SharedMcpClient};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,8 +16,8 @@ pub enum AgentError {
     Api(#[from] ApiError),
     #[error("Computer error: {0}")]
     Computer(#[from] ComputerError),
-    #[error("MCP error: {0}")]
-    Mcp(#[from] McpError),
+    #[error("Browser error: {0}")]
+    Browser(#[from] anyhow::Error),
     #[error("No API key set")]
     NoApiKey,
 }
@@ -62,7 +62,7 @@ pub struct Agent {
     running: Arc<AtomicBool>,
     computer: Mutex<Option<ComputerControl>>,
     bash: Mutex<BashExecutor>,
-    mcp_client: Option<SharedMcpClient>,
+    browser_client: SharedBrowserClient,
 }
 
 impl Agent {
@@ -72,12 +72,8 @@ impl Agent {
             running,
             computer: Mutex::new(None),
             bash: Mutex::new(BashExecutor::new()),
-            mcp_client: None,
+            browser_client: crate::browser::create_shared_browser_client(),
         }
-    }
-
-    pub fn set_mcp_client(&mut self, client: SharedMcpClient) {
-        self.mcp_client = Some(client);
     }
 
     pub fn set_api_key(&mut self, key: String) {
@@ -124,25 +120,47 @@ impl Agent {
 
         self.running.store(true, Ordering::SeqCst);
 
-        // get mcp tools only in browser mode
-        let mcp_tools = if mode == AgentMode::Browser {
-            if let Some(ref mcp_client) = self.mcp_client {
-                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
-                if client.is_connected() {
-                    let tools = client.get_tools_for_claude();
-                    println!("[agent] MCP tools available: {}", tools.len());
-                    tools
-                } else {
-                    println!("[agent] MCP client not connected");
-                    Vec::new()
+        // connect browser client in browser mode
+        if mode == AgentMode::Browser {
+            let mut browser_guard = self.browser_client.lock().await;
+            if browser_guard.is_none() {
+                println!("[agent] Connecting to browser...");
+                match BrowserClient::connect().await {
+                    Ok(client) => {
+                        println!("[agent] Browser connected");
+                        *browser_guard = Some(client);
+                    }
+                    Err(e) => {
+                        let err_str = e.to_string();
+                        if err_str.contains("CHROME_NEEDS_RESTART") {
+                            // emit event to ask user if they want to restart chrome
+                            println!("[agent] Chrome needs restart, asking user...");
+                            let _ = app_handle.emit("browser:needs-restart", ());
+
+                            // wait for user response via a oneshot channel
+                            // for now, just try to restart automatically
+                            match crate::browser::restart_chrome_with_debugging().await {
+                                Ok(client) => {
+                                    println!("[agent] Chrome restarted and connected");
+                                    *browser_guard = Some(client);
+                                }
+                                Err(restart_err) => {
+                                    println!("[agent] Chrome restart failed: {}", restart_err);
+                                    self.emit(&app_handle, "error", "Chrome restart failed. Please manually quit Chrome and restart with: open -a 'Google Chrome' --args --remote-debugging-port=9222", None, None);
+                                    self.running.store(false, Ordering::SeqCst);
+                                    return Err(AgentError::Browser(restart_err));
+                                }
+                            }
+                        } else {
+                            println!("[agent] Browser connection failed: {}", e);
+                            self.emit(&app_handle, "error", &format!("Browser connection failed: {}", e), None, None);
+                            self.running.store(false, Ordering::SeqCst);
+                            return Err(AgentError::Browser(e));
+                        }
+                    }
                 }
-            } else {
-                Vec::new()
             }
-        } else {
-            println!("[agent] Computer mode - skipping MCP tools");
-            Vec::new()
-        };
+        }
 
         let client = AnthropicClient::new(api_key, model);
         let mut messages: Vec<Message> = Vec::new();
@@ -249,7 +267,7 @@ impl Agent {
                 }
             });
 
-            let response_content = match client.send_message_streaming(messages.clone(), event_tx, &mcp_tools, mode).await {
+            let response_content = match client.send_message_streaming(messages.clone(), event_tx, mode).await {
                 Ok(content) => {
                     println!("[agent] API streaming response complete, {} blocks", content.len());
                     content
@@ -272,6 +290,17 @@ impl Agent {
 
             let mut tool_results: Vec<ContentBlock> = Vec::new();
 
+            // debug: print all block types received
+            let block_types: Vec<&str> = response_content.iter().map(|b| match b {
+                ContentBlock::Text { .. } => "text",
+                ContentBlock::Thinking { .. } => "thinking",
+                ContentBlock::ToolUse { name, .. } => name.as_str(),
+                ContentBlock::ToolResult { .. } => "tool_result",
+                ContentBlock::Image { .. } => "image",
+                ContentBlock::RedactedThinking { .. } => "redacted_thinking",
+            }).collect();
+            println!("[agent] Response blocks: {:?}", block_types);
+
             for block in &response_content {
                 if !self.running.load(Ordering::SeqCst) {
                     break;
@@ -281,7 +310,7 @@ impl Agent {
 
                 match block {
                     ContentBlock::Thinking { thinking, .. } => {
-                        println!("[agent] Thinking: {}...", &thinking[..thinking.len().min(100)]);
+                        println!("[agent] Thinking ({} chars): {}...", thinking.len(), &thinking[..thinking.len().min(300)]);
                         self.emit(&app_handle, "thinking", thinking, None, None);
                     }
 
@@ -472,49 +501,48 @@ impl Agent {
                                     content: vec![ToolResultContent::Text { text: output }],
                                 });
                             }
-                        } else if let Some(ref mcp_client) = self.mcp_client {
-                            // check if it's an mcp tool
-                            let is_mcp_tool = {
-                                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
-                                client.has_tool(name)
-                            };
+                        } else if is_browser_tool(name) && mode == AgentMode::Browser {
+                            // handle browser tools
+                            println!("[agent] Calling browser tool: {}", name);
+                            self.emit(
+                                &app_handle,
+                                "action",
+                                &format!("Browser: {}", name),
+                                Some(input.clone()),
+                                None,
+                            );
+                            let _ = app_handle.emit("agent:browser_tool", serde_json::json!({ "name": name }));
 
-                            if is_mcp_tool {
-                                println!("[agent] Calling MCP tool: {}", name);
-                                self.emit(
-                                    &app_handle,
-                                    "action",
-                                    &format!("MCP: {}", name),
-                                    Some(input.clone()),
-                                    None,
-                                );
-                                // emit globally for mini
-                                let _ = app_handle.emit("agent:mcp_tool", serde_json::json!({ "name": name }));
-
-                                let arguments = input.as_object().cloned();
-                                println!("[agent] MCP tool args: {:?}", arguments);
-                                let client: tokio::sync::RwLockReadGuard<'_, McpClient> = mcp_client.read().await;
-                                let result: Result<String, McpError> = client.call_tool(name, arguments).await;
-
+                            let mut browser_guard = self.browser_client.lock().await;
+                            if let Some(ref mut browser) = *browser_guard {
+                                let result = execute_browser_tool(browser, name, input).await;
                                 match result {
                                     Ok(output) => {
-                                        println!("[agent] MCP tool success: {}", &output[..output.len().min(200)]);
-                                        self.emit(&app_handle, "mcp_result", &output, None, None);
+                                        println!("[agent] Browser tool success ({} chars): {}...", output.len(), &output[..output.len().min(200)]);
+                                        self.emit(&app_handle, "browser_result", &output, None, None);
                                         tool_results.push(ContentBlock::ToolResult {
                                             tool_use_id: id.clone(),
                                             content: vec![ToolResultContent::Text { text: output }],
                                         });
                                     }
                                     Err(e) => {
-                                        let err_msg = format!("MCP error: {}", e);
-                                        println!("[agent] MCP tool failed: {}", err_msg);
-                                        self.emit(&app_handle, "error", &err_msg, None, None);
+                                        let err_msg = format!("Browser error: {}", e);
+                                        println!("[agent] Browser tool failed: {}", err_msg);
+                                        // emit browser_result not error - tool failures are expected
+                                        // (e.g. wait_for timeouts) and the model handles them gracefully
+                                        self.emit(&app_handle, "browser_result", &err_msg, None, None);
                                         tool_results.push(ContentBlock::ToolResult {
                                             tool_use_id: id.clone(),
                                             content: vec![ToolResultContent::Text { text: err_msg }],
                                         });
                                     }
                                 }
+                            } else {
+                                let err_msg = "Browser not connected".to_string();
+                                tool_results.push(ContentBlock::ToolResult {
+                                    tool_use_id: id.clone(),
+                                    content: vec![ToolResultContent::Text { text: err_msg }],
+                                });
                             }
                         }
                     }
@@ -538,6 +566,25 @@ impl Agent {
                 println!("[agent] No tool calls, task complete");
                 self.emit(&app_handle, "finished", "Task completed", None, None);
                 break;
+            }
+
+            // check if we're adding a new snapshot - if so, summarize old ones
+            let has_new_snapshot = tool_results.iter().any(|r| {
+                if let ContentBlock::ToolResult { content, .. } = r {
+                    content.iter().any(|c| {
+                        if let ToolResultContent::Text { text } = c {
+                            text.starts_with("uid=")
+                        } else {
+                            false
+                        }
+                    })
+                } else {
+                    false
+                }
+            });
+
+            if has_new_snapshot {
+                summarize_old_snapshots(&mut messages);
             }
 
             messages.push(Message {
@@ -693,4 +740,179 @@ fn format_action(action: &ComputerAction) -> String {
         }
         _ => format!("Action: {}", action.action),
     }
+}
+
+const BROWSER_TOOLS: &[&str] = &[
+    "take_snapshot",
+    "click",
+    "hover",
+    "fill",
+    "fill_form",
+    "drag",
+    "press_key",
+    "navigate_page",
+    "wait_for",
+    "new_page",
+    "list_pages",
+    "select_page",
+    "close_page",
+    "handle_dialog",
+];
+
+fn is_browser_tool(name: &str) -> bool {
+    BROWSER_TOOLS.contains(&name)
+}
+
+async fn execute_browser_tool(
+    browser: &mut BrowserClient,
+    name: &str,
+    input: &serde_json::Value,
+) -> anyhow::Result<String> {
+    match name {
+        "take_snapshot" => {
+            let verbose = input.get("verbose").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.take_snapshot(verbose).await
+        }
+        "click" => {
+            let uid = input.get("uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
+            let dbl_click = input.get("dblClick").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.click(uid, dbl_click).await
+        }
+        "hover" => {
+            let uid = input.get("uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
+            browser.hover(uid).await
+        }
+        "fill" => {
+            let uid = input.get("uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
+            let value = input.get("value").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("value required"))?;
+            browser.fill(uid, value).await
+        }
+        "press_key" => {
+            let key = input.get("key").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("key required"))?;
+            browser.press_key(key).await
+        }
+        "navigate_page" => {
+            let nav_type = input.get("type").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("type required"))?;
+            let url = input.get("url").and_then(|v| v.as_str());
+            let ignore_cache = input.get("ignoreCache").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.navigate_page(nav_type, url, ignore_cache).await
+        }
+        "wait_for" => {
+            let text = input.get("text").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("text required"))?;
+            let timeout = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(5000);
+            browser.wait_for(text, timeout).await
+        }
+        "new_page" => {
+            let url = input.get("url").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("url required"))?;
+            browser.new_page(url).await
+        }
+        "list_pages" => {
+            browser.list_pages().await
+        }
+        "select_page" => {
+            let page_idx = input.get("pageIdx").and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow::anyhow!("pageIdx required"))? as usize;
+            let bring_to_front = input.get("bringToFront").and_then(|v| v.as_bool()).unwrap_or(false);
+            browser.select_page(page_idx, bring_to_front).await
+        }
+        "close_page" => {
+            let page_idx = input.get("pageIdx").and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow::anyhow!("pageIdx required"))? as usize;
+            browser.close_page(page_idx).await
+        }
+        "drag" => {
+            let from_uid = input.get("from_uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("from_uid required"))?;
+            let to_uid = input.get("to_uid").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("to_uid required"))?;
+            browser.drag(from_uid, to_uid).await
+        }
+        "fill_form" => {
+            let elements = input.get("elements").and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow::anyhow!("elements array required"))?;
+            let pairs: Vec<(String, String)> = elements.iter().filter_map(|el| {
+                let uid = el.get("uid").and_then(|v| v.as_str())?;
+                let value = el.get("value").and_then(|v| v.as_str())?;
+                Some((uid.to_string(), value.to_string()))
+            }).collect();
+            browser.fill_form(&pairs).await
+        }
+        "handle_dialog" => {
+            let action = input.get("action").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("action required (accept/dismiss)"))?;
+            let accept = action == "accept";
+            let prompt_text = input.get("promptText").and_then(|v| v.as_str());
+            browser.handle_dialog(accept, prompt_text).await
+        }
+        _ => Err(anyhow::anyhow!("unknown browser tool: {}", name)),
+    }
+}
+
+// summarize old snapshots to reduce context size
+// keeps only interactive elements (links, buttons, inputs, headings)
+fn summarize_old_snapshots(messages: &mut Vec<Message>) {
+    for message in messages.iter_mut() {
+        if message.role != "user" {
+            continue;
+        }
+
+        for block in message.content.iter_mut() {
+            if let ContentBlock::ToolResult { content, .. } = block {
+                for item in content.iter_mut() {
+                    if let ToolResultContent::Text { text } = item {
+                        // check if it's a snapshot (starts with uid=)
+                        if text.starts_with("uid=") && text.len() > 5000 {
+                            *text = summarize_snapshot(text);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn summarize_snapshot(snapshot: &str) -> String {
+    // keep only lines with interactive roles
+    let interactive_roles = [
+        "link", "button", "textbox", "checkbox", "radio", "combobox",
+        "searchbox", "slider", "switch", "menuitem", "tab", "heading",
+        "WebArea", // keep the root
+    ];
+
+    let mut summary_lines: Vec<&str> = Vec::new();
+    let mut kept_count = 0;
+    let mut total_count = 0;
+
+    for line in snapshot.lines() {
+        total_count += 1;
+        let trimmed = line.trim();
+
+        // keep line if it contains any interactive role
+        let should_keep = interactive_roles.iter().any(|role| {
+            // match "uid=X_Y role" pattern
+            trimmed.contains(&format!(" {} ", role)) ||
+            trimmed.contains(&format!(" {} \"", role)) ||
+            trimmed.ends_with(&format!(" {}", role))
+        });
+
+        if should_keep {
+            summary_lines.push(line);
+            kept_count += 1;
+        }
+    }
+
+    let header = format!(
+        "[snapshot summarized: {} interactive elements from {} total]\n",
+        kept_count, total_count
+    );
+
+    header + &summary_lines.join("\n")
 }

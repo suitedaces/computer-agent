@@ -29,7 +29,7 @@ Here, I used it to autonomously read and reply to tweets, lol. This is purely fo
 
 **Computer Use** - Screenshots + mouse/keyboard control via enigo and xcap
 
-**Browser Use** - Chrome DevTools Protocol for direct browser automation
+**Browser Use** - Native Chrome DevTools Protocol via chromiumoxide (Rust). Auto-connects to running Chrome or launches with debugging enabled. 14 browser tools: snapshot, click, fill, hover, navigate, wait, new_page, list_pages, select_page, close_page, drag, fill_form, handle_dialog, upload_file.
 
 **Bash** - Terminal commands with safety guards against destructive operations
 

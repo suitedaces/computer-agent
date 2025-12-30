@@ -6,7 +6,9 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const BETA_HEADER: &str = "computer-use-2025-01-24";
+// computer-use-2025-01-24: enables computer_20250124 and bash_20250124 tools
+// interleaved-thinking-2025-05-14: enables extended thinking with tool use for Claude 4 models
+const BETA_HEADER: &str = "computer-use-2025-01-24,interleaved-thinking-2025-05-14";
 const API_VERSION: &str = "2023-06-01";
 
 /// display dimensions sent to claude for coordinate mapping.
@@ -18,8 +20,7 @@ const DISPLAY_HEIGHT: u32 = 800;
 /// while staying within typical rate limits
 const MAX_TOKENS: u32 = 16000;
 
-/// thinking budget for extended thinking. 5k is enough for reasoning through
-/// multi-step tasks without excessive latency
+/// thinking budget for extended thinking
 const THINKING_BUDGET: u32 = 5000;
 
 #[derive(Error, Debug)]
@@ -134,18 +135,24 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self, mcp_tools: &[serde_json::Value], mode: AgentMode) -> Vec<serde_json::Value> {
+    fn build_tools(&self, mode: AgentMode) -> Vec<serde_json::Value> {
         let mut tools = Vec::new();
 
-        // computer tool only in computer mode
-        if mode == AgentMode::Computer {
-            tools.push(serde_json::json!({
-                "type": "computer_20250124",
-                "name": "computer",
-                "display_width_px": DISPLAY_WIDTH,
-                "display_height_px": DISPLAY_HEIGHT,
-                "display_number": 1
-            }));
+        match mode {
+            AgentMode::Computer => {
+                // computer tool for screen control
+                tools.push(serde_json::json!({
+                    "type": "computer_20250124",
+                    "name": "computer",
+                    "display_width_px": DISPLAY_WIDTH,
+                    "display_height_px": DISPLAY_HEIGHT,
+                    "display_number": 1
+                }));
+            }
+            AgentMode::Browser => {
+                // browser tools via chromiumoxide CDP
+                tools.extend(build_browser_tools());
+            }
         }
 
         // bash available in both modes
@@ -154,8 +161,6 @@ impl AnthropicClient {
             "name": "bash"
         }));
 
-        // mcp tools only in browser mode (passed in already filtered)
-        tools.extend(mcp_tools.iter().cloned());
         tools
     }
 
@@ -163,14 +168,22 @@ impl AnthropicClient {
         &self,
         messages: Vec<Message>,
         event_tx: mpsc::UnboundedSender<StreamEvent>,
-        mcp_tools: &[serde_json::Value],
         mode: AgentMode,
     ) -> Result<Vec<ContentBlock>, ApiError> {
+        let system = match mode {
+            AgentMode::Computer => SYSTEM_PROMPT.to_string(),
+            AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
+        };
+
+        let tools = self.build_tools(mode);
+        println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
+        println!("[api] Tools JSON: {}", serde_json::to_string_pretty(&tools).unwrap_or_default());
+
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: MAX_TOKENS,
-            system: SYSTEM_PROMPT.to_string(),
-            tools: self.build_tools(mcp_tools, mode),
+            system,
+            tools,
             messages,
             stream: true,
             thinking: ThinkingConfig {
@@ -345,14 +358,24 @@ impl AnthropicClient {
                                     }
                                 }
                                 "tool_use" => {
-                                    if index < current_tool_json.len() && !current_tool_json[index].is_empty() {
-                                        let (id, name) = if index < tool_info.len() {
-                                            tool_info[index].clone()
+                                    // tool_use may have empty input (e.g. take_snapshot with no args)
+                                    // so we check tool_info instead of current_tool_json
+                                    let (id, name) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    if !id.is_empty() {
+                                        let json_str = if index < current_tool_json.len() {
+                                            &current_tool_json[index]
                                         } else {
-                                            (String::new(), String::new())
+                                            ""
                                         };
-                                        let input: serde_json::Value = serde_json::from_str(&current_tool_json[index])
-                                            .unwrap_or(serde_json::json!({}));
+                                        let input: serde_json::Value = if json_str.is_empty() {
+                                            serde_json::json!({})
+                                        } else {
+                                            serde_json::from_str(json_str).unwrap_or(serde_json::json!({}))
+                                        };
                                         content_blocks.push(ContentBlock::ToolUse { id, name, input });
                                     }
                                 }
@@ -374,23 +397,185 @@ impl AnthropicClient {
     }
 }
 
-const SYSTEM_PROMPT: &str = r#"You are taskhomie, a computer control agent in a macOS menubar app. You see the screen, move the mouse, click, type, and run bash commands.
+const SYSTEM_PROMPT: &str = r#"You are taskhomie, a macOS computer control agent. You see the screen, control mouse/keyboard, and run bash.
 
-Rules:
-- Click to focus before typing
-- Screenshot after actions to verify
-- Use keyboard shortcuts (cmd+c, cmd+v, cmd+tab, cmd+w, cmd+q)
-- If something fails, try another approach
-- Always call a tool, never just text
-- Keep responses concise
-- Use `sleep N` in bash when waiting for pages, animations, or downloads to complete
+Take action with tools on every turn. Click to focus before typing. Screenshot after actions to verify. If something fails, try another approach.
 
-macOS CLI shortcuts (fast, use when applicable):
-- open -a "App" (launch), open file.pdf (default app), open https://url (browser)
-- pbpaste/pbcopy (clipboard), mdfind "query" (spotlight search)
-- osascript -e 'tell app "X" to activate/quit'
+Prefer bash for speed: open -a "App", open https://url, pbcopy/pbpaste, mdfind. Use `sleep N` when waiting.
 
-Use computer tool for:
-- Browser interactions (clicking links, filling forms, reading page content)
-- Any visual/UI task requiring mouse clicks or reading the screen
-- Tasks where you need to see what happened"#;
+Use computer tool for visual tasks: clicking UI, reading screen content, filling forms."#;
+
+const BROWSER_SYSTEM_PROMPT: &str = r#"You are taskhomie in browser mode. You control Chrome via CDP.
+
+Start every task with take_snapshot to see the page. Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
+
+Take action with tools on every turn. Use bash for file operations."#;
+
+fn build_browser_tools() -> Vec<serde_json::Value> {
+    vec![
+        serde_json::json!({
+            "name": "take_snapshot",
+            "description": "Get page accessibility tree with element uids. Call first before interacting.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "verbose": { "type": "boolean", "description": "Include ignored nodes" }
+                },
+                "required": []
+            }
+        }),
+        serde_json::json!({
+            "name": "click",
+            "description": "Click element by uid",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "uid": { "type": "string", "description": "Element uid from snapshot" },
+                    "dblClick": { "type": "boolean", "description": "Double click" }
+                },
+                "required": ["uid"]
+            }
+        }),
+        serde_json::json!({
+            "name": "hover",
+            "description": "Hover over element by uid",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "uid": { "type": "string", "description": "Element uid from snapshot" }
+                },
+                "required": ["uid"]
+            }
+        }),
+        serde_json::json!({
+            "name": "fill",
+            "description": "Type text into input element",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "uid": { "type": "string", "description": "Input element uid" },
+                    "value": { "type": "string", "description": "Text to type" }
+                },
+                "required": ["uid", "value"]
+            }
+        }),
+        serde_json::json!({
+            "name": "fill_form",
+            "description": "Fill multiple form inputs at once",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "elements": {
+                        "type": "array",
+                        "description": "Array of {uid, value} pairs",
+                        "items": {
+                            "type": "object",
+                            "properties": { "uid": { "type": "string" }, "value": { "type": "string" } },
+                            "required": ["uid", "value"]
+                        }
+                    }
+                },
+                "required": ["elements"]
+            }
+        }),
+        serde_json::json!({
+            "name": "drag",
+            "description": "Drag element to another element",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "from_uid": { "type": "string", "description": "Source element uid" },
+                    "to_uid": { "type": "string", "description": "Target element uid" }
+                },
+                "required": ["from_uid", "to_uid"]
+            }
+        }),
+        serde_json::json!({
+            "name": "press_key",
+            "description": "Press key or combo (Enter, Control+A, Shift+Tab)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "description": "Key or combo" }
+                },
+                "required": ["key"]
+            }
+        }),
+        serde_json::json!({
+            "name": "navigate_page",
+            "description": "Navigate: url, back, forward, or reload",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "enum": ["url", "back", "forward", "reload"] },
+                    "url": { "type": "string", "description": "URL (for type=url)" },
+                    "ignoreCache": { "type": "boolean", "description": "Bypass cache on reload" }
+                },
+                "required": ["type"]
+            }
+        }),
+        serde_json::json!({
+            "name": "wait_for",
+            "description": "Wait for text to appear on page",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "Text to wait for" },
+                    "timeout": { "type": "number", "description": "Timeout ms (default 5000)" }
+                },
+                "required": ["text"]
+            }
+        }),
+        serde_json::json!({
+            "name": "new_page",
+            "description": "Open new tab with URL",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "URL to open" }
+                },
+                "required": ["url"]
+            }
+        }),
+        serde_json::json!({
+            "name": "list_pages",
+            "description": "List open tabs",
+            "input_schema": { "type": "object", "properties": {}, "required": [] }
+        }),
+        serde_json::json!({
+            "name": "select_page",
+            "description": "Switch to tab by index",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pageIdx": { "type": "number", "description": "Tab index" },
+                    "bringToFront": { "type": "boolean", "description": "Focus the tab" }
+                },
+                "required": ["pageIdx"]
+            }
+        }),
+        serde_json::json!({
+            "name": "close_page",
+            "description": "Close tab by index (cannot close last tab)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pageIdx": { "type": "number", "description": "Tab index to close" }
+                },
+                "required": ["pageIdx"]
+            }
+        }),
+        serde_json::json!({
+            "name": "handle_dialog",
+            "description": "Handle browser dialog (alert, confirm, prompt)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["accept", "dismiss"] },
+                    "promptText": { "type": "string", "description": "Text for prompt dialogs" }
+                },
+                "required": ["action"]
+            }
+        }),
+    ]
+}
