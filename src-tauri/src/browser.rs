@@ -46,12 +46,17 @@ impl BrowserClient {
         if let Some(ws_url) = try_find_existing_chrome().await {
             println!("[browser] Connecting to existing Chrome at {}", ws_url);
             match Browser::connect(&ws_url).await {
-                Ok((browser, handler)) => {
+                Ok((mut browser, handler)) => {
                     let handler_task = tokio::spawn(async move {
                         handler_loop(handler).await;
                     });
 
+                    // fetch existing targets so we can see tabs that were already open
+                    let _ = browser.fetch_targets().await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     let pages = browser.pages().await.unwrap_or_default();
+                    println!("[browser] Found {} existing pages", pages.len());
+
                     return Ok(Self {
                         browser,
                         _handler_task: handler_task,
@@ -67,9 +72,19 @@ impl BrowserClient {
             }
         }
 
-        // no existing chrome, launch a new one using chromiumoxide
+        // no existing chrome with debugging, try to launch a new one
+        // on macOS, this only works if Chrome isn't already running
         println!("[browser] Launching Chrome with user profile...");
-        let (browser, handler) = launch_chrome_with_profile().await?;
+        let (browser, handler) = match launch_chrome_with_profile().await {
+            Ok(b) => b,
+            Err(e) => {
+                // check if chrome is already running without debugging
+                if is_chrome_running() {
+                    return Err(anyhow!("CHROME_NEEDS_RESTART"));
+                }
+                return Err(e);
+            }
+        };
 
         let handler_task = tokio::spawn(async move {
             handler_loop(handler).await;
@@ -592,6 +607,81 @@ async fn handler_loop(mut handler: Handler) {
             break;
         }
     }
+}
+
+// check if chrome is already running (macOS)
+fn is_chrome_running() -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-x", "Google Chrome"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+// restart chrome with debugging enabled (macOS)
+// returns a connected BrowserClient if successful
+pub async fn restart_chrome_with_debugging() -> Result<BrowserClient> {
+    // quit chrome gracefully
+    println!("[browser] Quitting Chrome...");
+    std::process::Command::new("osascript")
+        .args(["-e", "tell application \"Google Chrome\" to quit"])
+        .output()
+        .context("failed to quit Chrome")?;
+
+    // wait for chrome to fully quit
+    for _ in 0..10 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if !is_chrome_running() {
+            break;
+        }
+    }
+
+    if is_chrome_running() {
+        return Err(anyhow!("Chrome didn't quit in time"));
+    }
+
+    // launch with debugging
+    println!("[browser] Launching Chrome with debugging...");
+    std::process::Command::new("open")
+        .args(["-a", "Google Chrome", "--args", "--remote-debugging-port=9222"])
+        .spawn()
+        .context("failed to launch Chrome")?;
+
+    // wait for debug port to be ready
+    for _ in 0..20 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if let Ok(resp) = reqwest::get("http://127.0.0.1:9222/json/version").await {
+            if resp.status().is_success() {
+                break;
+            }
+        }
+    }
+
+    // try to connect
+    let (mut browser, handler) = Browser::connect("http://127.0.0.1:9222")
+        .await
+        .context("failed to connect after restart")?;
+
+    println!("[browser] Connected to Chrome with debugging");
+
+    let handler_task = tokio::spawn(async move {
+        handler_loop(handler).await;
+    });
+
+    // fetch existing targets
+    let _ = browser.fetch_targets().await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let pages = browser.pages().await.unwrap_or_default();
+    println!("[browser] Found {} pages after restart", pages.len());
+
+    Ok(BrowserClient {
+        browser,
+        _handler_task: handler_task,
+        pages,
+        selected_page_idx: 0,
+        snapshot_id: 0,
+        uid_to_backend_node: HashMap::new(),
+    })
 }
 
 // try to find existing chrome with debugging enabled

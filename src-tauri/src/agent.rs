@@ -131,10 +131,32 @@ impl Agent {
                         *browser_guard = Some(client);
                     }
                     Err(e) => {
-                        println!("[agent] Browser connection failed: {}", e);
-                        self.emit(&app_handle, "error", &format!("Browser connection failed: {}", e), None, None);
-                        self.running.store(false, Ordering::SeqCst);
-                        return Err(AgentError::Browser(e));
+                        let err_str = e.to_string();
+                        if err_str.contains("CHROME_NEEDS_RESTART") {
+                            // emit event to ask user if they want to restart chrome
+                            println!("[agent] Chrome needs restart, asking user...");
+                            let _ = app_handle.emit("browser:needs-restart", ());
+
+                            // wait for user response via a oneshot channel
+                            // for now, just try to restart automatically
+                            match crate::browser::restart_chrome_with_debugging().await {
+                                Ok(client) => {
+                                    println!("[agent] Chrome restarted and connected");
+                                    *browser_guard = Some(client);
+                                }
+                                Err(restart_err) => {
+                                    println!("[agent] Chrome restart failed: {}", restart_err);
+                                    self.emit(&app_handle, "error", "Chrome restart failed. Please manually quit Chrome and restart with: open -a 'Google Chrome' --args --remote-debugging-port=9222", None, None);
+                                    self.running.store(false, Ordering::SeqCst);
+                                    return Err(AgentError::Browser(restart_err));
+                                }
+                            }
+                        } else {
+                            println!("[agent] Browser connection failed: {}", e);
+                            self.emit(&app_handle, "error", &format!("Browser connection failed: {}", e), None, None);
+                            self.running.store(false, Ordering::SeqCst);
+                            return Err(AgentError::Browser(e));
+                        }
                     }
                 }
             }
