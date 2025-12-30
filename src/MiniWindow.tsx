@@ -273,7 +273,7 @@ export default function MiniWindow() {
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="mt-4 px-4 py-2.5 bg-black rounded-lg"
+                className="mt-4 px-4 py-2.5 bg-black rounded-2xl"
               >
                 <p className="text-white font-medium text-[14px] text-center max-w-[220px] leading-relaxed">
                   {pttInterim}
@@ -315,7 +315,7 @@ export default function MiniWindow() {
           <motion.div
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mt-4 px-4 py-3 bg-black rounded-xl text-center"
+            className="mt-4 px-4 py-3 bg-black rounded-2xl text-center"
           >
             <p className="text-white/90 text-[13px] font-medium">No speech detected</p>
             <p className="text-white/50 text-[11px] mt-1">Hold ⌘⇧V and speak</p>

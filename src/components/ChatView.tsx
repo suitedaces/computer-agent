@@ -1008,20 +1008,6 @@ export default function ChatView({ variant }: ChatViewProps) {
               disabled={isRunning}
             />
           <div className="flex items-center gap-2">
-            {/* hands off toggle - switches to computer mode */}
-            <button
-              onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
-              disabled={isRunning}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] transition-colors border ${
-                selectedMode === "computer"
-                  ? "bg-orange-500/20 border-orange-400/40 text-orange-300"
-                  : "bg-white/5 border-white/10 text-white/40 hover:text-white/60 hover:border-white/20"
-              } ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
-              title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
-            >
-              <Hand size={12} />
-              <span>Hands Off</span>
-            </button>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value as ModelId)}
@@ -1089,6 +1075,19 @@ export default function ChatView({ variant }: ChatViewProps) {
           </div>
         ) : (
           <div className="glass-card flex items-center gap-2 p-2">
+            <motion.button
+              onClick={toggleVoice}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                isVoiceActive
+                  ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
+                  : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+              }`}
+              title={isVoiceActive ? "Stop recording" : "Start voice input"}
+            >
+              {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
+            </motion.button>
             <textarea
               ref={inputRef}
               value={inputText + (voiceText ? (inputText ? " " : "") + voiceText : "")}
@@ -1105,17 +1104,18 @@ export default function ChatView({ variant }: ChatViewProps) {
               }}
             />
             <motion.button
-              onClick={toggleVoice}
+              onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
-                isVoiceActive
-                  ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
+              className={`shrink-0 h-8 px-2 rounded-xl flex items-center gap-1.5 transition-colors ${
+                selectedMode === "computer"
+                  ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
                   : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
               }`}
-              title={isVoiceActive ? "Stop recording" : "Start voice input"}
+              title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
             >
-              {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
+              <MousePointerClick size={12} />
+              <span className="text-[9px]">Computer</span>
             </motion.button>
             <motion.button
               onClick={() => submit()}
