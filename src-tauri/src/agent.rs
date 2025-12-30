@@ -522,7 +522,7 @@ impl Agent {
                             self.emit(
                                 &app_handle,
                                 "action",
-                                &format!("Browser: {}", name),
+                                &format_browser_action(name, input),
                                 Some(input.clone()),
                                 None,
                             );
@@ -793,6 +793,89 @@ const BROWSER_TOOLS: &[&str] = &[
 
 fn is_browser_tool(name: &str) -> bool {
     BROWSER_TOOLS.contains(&name)
+}
+
+fn format_browser_action(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "take_snapshot" => "Taking snapshot".to_string(),
+        "click" => {
+            let dbl = input.get("dblClick").and_then(|v| v.as_bool()).unwrap_or(false);
+            if dbl { "Double clicking".to_string() } else { "Clicking".to_string() }
+        }
+        "hover" => "Hovering".to_string(),
+        "fill" => {
+            if let Some(val) = input.get("value").and_then(|v| v.as_str()) {
+                let preview = if val.len() > 20 { format!("{}...", &val[..20]) } else { val.to_string() };
+                format!("Filling: \"{}\"", preview)
+            } else {
+                "Filling field".to_string()
+            }
+        }
+        "press_key" => {
+            if let Some(key) = input.get("key").and_then(|v| v.as_str()) {
+                format!("Pressing {}", key)
+            } else {
+                "Pressing key".to_string()
+            }
+        }
+        "navigate_page" => {
+            match input.get("type").and_then(|v| v.as_str()) {
+                Some("goto") => {
+                    if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
+                        let preview = if url.len() > 40 { format!("{}...", &url[..40]) } else { url.to_string() };
+                        format!("Navigating to {}", preview)
+                    } else {
+                        "Navigating".to_string()
+                    }
+                }
+                Some("back") => "Going back".to_string(),
+                Some("forward") => "Going forward".to_string(),
+                Some("reload") => "Reloading page".to_string(),
+                _ => "Navigating".to_string(),
+            }
+        }
+        "wait_for" => {
+            if let Some(text) = input.get("text").and_then(|v| v.as_str()) {
+                let preview = if text.len() > 20 { format!("{}...", &text[..20]) } else { text.to_string() };
+                format!("Waiting for \"{}\"", preview)
+            } else {
+                "Waiting".to_string()
+            }
+        }
+        "new_page" => {
+            if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
+                let preview = if url.len() > 40 { format!("{}...", &url[..40]) } else { url.to_string() };
+                format!("Opening new tab: {}", preview)
+            } else {
+                "Opening new tab".to_string()
+            }
+        }
+        "list_pages" => "Listing tabs".to_string(),
+        "select_page" => {
+            if let Some(idx) = input.get("pageIdx").and_then(|v| v.as_u64()) {
+                format!("Switching to tab {}", idx)
+            } else {
+                "Switching tab".to_string()
+            }
+        }
+        "close_page" => {
+            if let Some(idx) = input.get("pageIdx").and_then(|v| v.as_u64()) {
+                format!("Closing tab {}", idx)
+            } else {
+                "Closing tab".to_string()
+            }
+        }
+        "drag" => "Dragging".to_string(),
+        "fill_form" => "Filling form".to_string(),
+        "handle_dialog" => {
+            match input.get("action").and_then(|v| v.as_str()) {
+                Some("accept") => "Accepting dialog".to_string(),
+                Some("dismiss") => "Dismissing dialog".to_string(),
+                _ => "Handling dialog".to_string(),
+            }
+        }
+        _ => format!("Browser: {}", name),
+    }
 }
 
 async fn execute_browser_tool(

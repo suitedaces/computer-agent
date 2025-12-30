@@ -472,6 +472,18 @@ function HistoryDropdown({ onNewChat, onLoad, disabled }: HistoryDropdownProps) 
 function ThinkingBubble() {
   const { streamingThinking, isRunning } = useAgentStore();
   const [expanded, setExpanded] = useState(false);
+  const thinkingScrollRef = useRef<HTMLDivElement>(null);
+
+  // auto-scroll thinking content to bottom
+  useEffect(() => {
+    if (!streamingThinking || !isRunning) return;
+    const frame = requestAnimationFrame(() => {
+      if (thinkingScrollRef.current) {
+        thinkingScrollRef.current.scrollTop = thinkingScrollRef.current.scrollHeight;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [streamingThinking, isRunning]);
 
   if (!streamingThinking) return null;
 
@@ -493,7 +505,10 @@ function ThinkingBubble() {
             {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
           </span>
         </button>
-        <div className={`text-[11px] leading-relaxed text-white/50 overflow-hidden transition-all ${expanded ? "max-h-[300px]" : "max-h-[60px]"} overflow-y-auto`}>
+        <div
+          ref={thinkingScrollRef}
+          className={`text-[11px] leading-relaxed text-white/50 overflow-hidden transition-all ${expanded ? "max-h-[300px]" : "max-h-[60px]"} overflow-y-auto`}
+        >
           <Streamdown isAnimating={isRunning}>{streamingThinking}</Streamdown>
         </div>
       </div>
