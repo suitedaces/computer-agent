@@ -415,211 +415,62 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({
             "name": "take_snapshot",
-            "description": "Take a text snapshot of the current page based on the accessibility tree. Returns elements with unique ids (uid) for interaction. Always call this first before interacting with elements.",
+            "description": "Get page accessibility tree with element uids. Call first before interacting.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "verbose": {
-                        "type": "boolean",
-                        "description": "Include all a11y info including ignored nodes. Default false."
-                    }
+                    "verbose": { "type": "boolean", "description": "Include ignored nodes" }
                 },
                 "required": []
             }
         }),
         serde_json::json!({
             "name": "click",
-            "description": "Click on an element by its uid from the snapshot",
+            "description": "Click element by uid",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "uid": {
-                        "type": "string",
-                        "description": "The uid of the element from take_snapshot"
-                    },
-                    "dblClick": {
-                        "type": "boolean",
-                        "description": "Double click instead of single click"
-                    }
+                    "uid": { "type": "string", "description": "Element uid from snapshot" },
+                    "dblClick": { "type": "boolean", "description": "Double click" }
                 },
                 "required": ["uid"]
             }
         }),
         serde_json::json!({
             "name": "hover",
-            "description": "Hover over an element by its uid",
+            "description": "Hover over element by uid",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "uid": {
-                        "type": "string",
-                        "description": "The uid of the element from take_snapshot"
-                    }
+                    "uid": { "type": "string", "description": "Element uid from snapshot" }
                 },
                 "required": ["uid"]
             }
         }),
         serde_json::json!({
             "name": "fill",
-            "description": "Type text into an input element by its uid",
+            "description": "Type text into input element",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "uid": {
-                        "type": "string",
-                        "description": "The uid of the input element"
-                    },
-                    "value": {
-                        "type": "string",
-                        "description": "The text to type"
-                    }
+                    "uid": { "type": "string", "description": "Input element uid" },
+                    "value": { "type": "string", "description": "Text to type" }
                 },
                 "required": ["uid", "value"]
             }
         }),
         serde_json::json!({
-            "name": "press_key",
-            "description": "Press a key or key combination",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "key": {
-                        "type": "string",
-                        "description": "Key to press, e.g. 'Enter', 'Control+A', 'Shift+Tab'"
-                    }
-                },
-                "required": ["key"]
-            }
-        }),
-        serde_json::json!({
-            "name": "navigate_page",
-            "description": "Navigate the page",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "enum": ["url", "back", "forward", "reload"],
-                        "description": "Navigation type"
-                    },
-                    "url": {
-                        "type": "string",
-                        "description": "URL to navigate to (only for type=url)"
-                    },
-                    "ignoreCache": {
-                        "type": "boolean",
-                        "description": "Ignore cache on reload"
-                    }
-                },
-                "required": ["type"]
-            }
-        }),
-        serde_json::json!({
-            "name": "wait_for",
-            "description": "Wait for text to appear on the page",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to wait for"
-                    },
-                    "timeout": {
-                        "type": "number",
-                        "description": "Timeout in milliseconds (default 5000)"
-                    }
-                },
-                "required": ["text"]
-            }
-        }),
-        serde_json::json!({
-            "name": "new_page",
-            "description": "Create a new browser tab and navigate to URL",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "URL to open in new tab"
-                    }
-                },
-                "required": ["url"]
-            }
-        }),
-        serde_json::json!({
-            "name": "list_pages",
-            "description": "List all open browser tabs",
-            "input_schema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }),
-        serde_json::json!({
-            "name": "select_page",
-            "description": "Select a browser tab by index",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pageIdx": {
-                        "type": "number",
-                        "description": "Index of the page (from list_pages)"
-                    },
-                    "bringToFront": {
-                        "type": "boolean",
-                        "description": "Bring the tab to front"
-                    }
-                },
-                "required": ["pageIdx"]
-            }
-        }),
-        serde_json::json!({
-            "name": "close_page",
-            "description": "Close a browser tab by index. Cannot close the last open page.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pageIdx": {
-                        "type": "number",
-                        "description": "Index of the page to close (from list_pages)"
-                    }
-                },
-                "required": ["pageIdx"]
-            }
-        }),
-        serde_json::json!({
-            "name": "drag",
-            "description": "Drag an element and drop it onto another element",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "from_uid": {
-                        "type": "string",
-                        "description": "The uid of the element to drag"
-                    },
-                    "to_uid": {
-                        "type": "string",
-                        "description": "The uid of the element to drop onto"
-                    }
-                },
-                "required": ["from_uid", "to_uid"]
-            }
-        }),
-        serde_json::json!({
             "name": "fill_form",
-            "description": "Fill multiple form elements at once",
+            "description": "Fill multiple form inputs at once",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "elements": {
                         "type": "array",
-                        "description": "Array of {uid, value} objects to fill",
+                        "description": "Array of {uid, value} pairs",
                         "items": {
                             "type": "object",
-                            "properties": {
-                                "uid": { "type": "string" },
-                                "value": { "type": "string" }
-                            },
+                            "properties": { "uid": { "type": "string" }, "value": { "type": "string" } },
                             "required": ["uid", "value"]
                         }
                     }
@@ -628,20 +479,100 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
             }
         }),
         serde_json::json!({
-            "name": "handle_dialog",
-            "description": "Handle a browser dialog (alert, confirm, prompt)",
+            "name": "drag",
+            "description": "Drag element to another element",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["accept", "dismiss"],
-                        "description": "Whether to accept or dismiss the dialog"
-                    },
-                    "promptText": {
-                        "type": "string",
-                        "description": "Text to enter for prompt dialogs (optional)"
-                    }
+                    "from_uid": { "type": "string", "description": "Source element uid" },
+                    "to_uid": { "type": "string", "description": "Target element uid" }
+                },
+                "required": ["from_uid", "to_uid"]
+            }
+        }),
+        serde_json::json!({
+            "name": "press_key",
+            "description": "Press key or combo (Enter, Control+A, Shift+Tab)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "description": "Key or combo" }
+                },
+                "required": ["key"]
+            }
+        }),
+        serde_json::json!({
+            "name": "navigate_page",
+            "description": "Navigate: url, back, forward, or reload",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "enum": ["url", "back", "forward", "reload"] },
+                    "url": { "type": "string", "description": "URL (for type=url)" },
+                    "ignoreCache": { "type": "boolean", "description": "Bypass cache on reload" }
+                },
+                "required": ["type"]
+            }
+        }),
+        serde_json::json!({
+            "name": "wait_for",
+            "description": "Wait for text to appear on page",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "Text to wait for" },
+                    "timeout": { "type": "number", "description": "Timeout ms (default 5000)" }
+                },
+                "required": ["text"]
+            }
+        }),
+        serde_json::json!({
+            "name": "new_page",
+            "description": "Open new tab with URL",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "URL to open" }
+                },
+                "required": ["url"]
+            }
+        }),
+        serde_json::json!({
+            "name": "list_pages",
+            "description": "List open tabs",
+            "input_schema": { "type": "object", "properties": {}, "required": [] }
+        }),
+        serde_json::json!({
+            "name": "select_page",
+            "description": "Switch to tab by index",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pageIdx": { "type": "number", "description": "Tab index" },
+                    "bringToFront": { "type": "boolean", "description": "Focus the tab" }
+                },
+                "required": ["pageIdx"]
+            }
+        }),
+        serde_json::json!({
+            "name": "close_page",
+            "description": "Close tab by index (cannot close last tab)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pageIdx": { "type": "number", "description": "Tab index to close" }
+                },
+                "required": ["pageIdx"]
+            }
+        }),
+        serde_json::json!({
+            "name": "handle_dialog",
+            "description": "Handle browser dialog (alert, confirm, prompt)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["accept", "dismiss"] },
+                    "promptText": { "type": "string", "description": "Text for prompt dialogs" }
                 },
                 "required": ["action"]
             }
