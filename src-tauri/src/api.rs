@@ -453,7 +453,11 @@ Keep text responses very concise. Focus on doing, not explaining. Use tools on e
 
 Start every task with take_snapshot to see the page. Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
 
-Use bash for file operations."#;
+Use bash for file operations.
+
+If browser tools fail with connection errors, Chrome may have been closed. Run this bash command to relaunch it with debugging enabled:
+open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.taskhomie-chrome"
+Then wait a few seconds and retry the browser tool."#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![

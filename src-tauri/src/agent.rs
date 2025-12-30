@@ -608,13 +608,18 @@ impl Agent {
             };
             messages.push(tool_result_message.clone());
             conversation.add_message(tool_result_message);
+
+            // save after each round so we don't lose progress on crash/stop
+            conversation.auto_title();
+            if let Err(e) = storage::save_conversation(&conversation) {
+                println!("[agent] Failed to save conversation: {}", e);
+            }
         }
 
         self.running.store(false, Ordering::SeqCst);
 
-        // save conversation if we have any messages
+        // final save
         if !conversation.messages.is_empty() {
-            conversation.auto_title();
             if let Err(e) = storage::save_conversation(&conversation) {
                 println!("[agent] Failed to save conversation: {}", e);
             } else {

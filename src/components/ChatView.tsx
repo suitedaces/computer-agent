@@ -274,6 +274,7 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
     // find first text block for main content
     let mainText = "";
     let screenshot: string | undefined;
+    let hasToolResult = false;
 
     for (const block of msg.content) {
       if (block.type === "text" && block.text) {
@@ -283,9 +284,17 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
       if (block.type === "image" && block.source?.data) {
         screenshot = block.source.data;
       }
+      if (block.type === "tool_result") {
+        hasToolResult = true;
+      }
     }
 
     if (msg.role === "user") {
+      // skip tool result messages (they have role "user" but contain tool_result blocks)
+      if (hasToolResult) continue;
+      // skip empty user messages
+      if (!mainText && !screenshot) continue;
+
       chatMessages.push({
         id: crypto.randomUUID(),
         role: "user",
@@ -330,6 +339,16 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
               timestamp: new Date(conversation.updated_at * 1000),
               type: "action",
               action: input as unknown as ChatMessage["action"],
+              pending: false,
+            });
+          } else {
+            // browser tools - show as action
+            chatMessages.push({
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: block.name,
+              timestamp: new Date(conversation.updated_at * 1000),
+              type: "action",
               pending: false,
             });
           }

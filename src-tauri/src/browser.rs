@@ -621,18 +621,34 @@ fn is_chrome_running() -> bool {
 // restart chrome with debugging enabled (macOS)
 // returns a connected BrowserClient if successful
 pub async fn restart_chrome_with_debugging() -> Result<BrowserClient> {
-    // quit chrome gracefully
+    // try graceful quit first
     println!("[browser] Quitting Chrome...");
     std::process::Command::new("osascript")
         .args(["-e", "tell application \"Google Chrome\" to quit"])
         .output()
         .context("failed to quit Chrome")?;
 
-    // wait for chrome to fully quit
-    for _ in 0..10 {
+    // wait for chrome to quit gracefully
+    for _ in 0..6 {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         if !is_chrome_running() {
             break;
+        }
+    }
+
+    // if still running, force kill
+    if is_chrome_running() {
+        println!("[browser] Chrome didn't quit gracefully, force killing...");
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "Google Chrome"])
+            .output();
+
+        // wait for force kill to take effect
+        for _ in 0..10 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            if !is_chrome_running() {
+                break;
+            }
         }
     }
 
@@ -640,10 +656,19 @@ pub async fn restart_chrome_with_debugging() -> Result<BrowserClient> {
         return Err(anyhow!("Chrome didn't quit in time"));
     }
 
-    // launch with debugging
-    println!("[browser] Launching Chrome with debugging...");
+    // launch with dedicated debug profile (not user's main profile)
+    // using the main profile causes issues with "confirm before quit" dialogs
+    // and bot detection on login pages
+    println!("[browser] Launching Chrome with debug profile...");
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users".to_string());
+    let user_data_dir = format!("{}/.taskhomie-chrome", home);
     std::process::Command::new("open")
-        .args(["-a", "Google Chrome", "--args", "--remote-debugging-port=9222"])
+        .args([
+            "-a", "Google Chrome",
+            "--args",
+            "--remote-debugging-port=9222",
+            &format!("--user-data-dir={}", user_data_dir),
+        ])
         .spawn()
         .context("failed to launch Chrome")?;
 
