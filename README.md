@@ -13,11 +13,9 @@ Here, I used it to autonomously read and reply to tweets, lol. This is purely fo
 
 ## Modes
 
-**Hands-Off Mode (Computer Use)** - Takes over your entire screen. Controls mouse, keyboard, any app. Use when task spans multiple apps or needs full desktop access. Toggle via "Hands Off" button in titlebar.
+**Computer Use Mode** - Takes over your screen. Sees what you see via screenshots and controls your cursor and keyboard directly. Use when the task spans multiple apps or needs full desktop access. You step away while it works.
 
-**Browser Mode** - Uses Chrome DevTools Protocol (CDP) instead of mouse/keyboard simulation. Reads page accessibility tree instead of screenshots. Faster and more reliable for web-only tasks. Uses isolated Chrome profile (`~/.taskhomie-chrome`) and auto-launches Chrome with debugging if needed.
-
-**Bash** - Terminal commands with safety guards against destructive operations
+**Background Mode** - Runs async while you do other things. Uses Chrome DevTools Protocol for web automation and terminal for everything else. Doesn't touch your mouse or keyboard. Faster and more reliable for web + terminal tasks.
 
 ## Setup
 
@@ -44,8 +42,11 @@ On macOS, you'll need to grant accessibility permissions when prompted (System S
 
 ## Shortcuts
 
+- `⌘⇧V` - push-to-talk (uses current mode)
+- `⌃⇧C` - push-to-talk → computer use mode
+- `⌃⇧B` - push-to-talk → background mode
+- `⌘⇧H` - help mode (screenshot + quick prompt)
 - `⌘⇧S` - stop agent
-- `⌘⇧H` - help mode (screenshot + quick prompt from mini bar)
 
 ## Stack
 
