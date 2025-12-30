@@ -34,8 +34,11 @@ import {
   MessageCircle,
   Eye,
   GripHorizontal,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // url pill component showing domain and path
 function UrlLink({ url }: { url: string }) {
@@ -859,12 +862,70 @@ export default function ChatView({ variant }: ChatViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // voice state
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [voiceText, setVoiceText] = useState("");
+
   const isSpotlight = variant === "spotlight";
   const isMini = variant === "mini";
   const panelClass = isMini ? "mini-panel" : isSpotlight ? "spotlight-panel" : "app-panel";
   const padding = isMini ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
   const inputPadding = isMini ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
   const gifSize = isMini ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
+
+  // ref to track current input for voice append
+  const inputTextRef = useRef(inputText);
+  useEffect(() => { inputTextRef.current = inputText; }, [inputText]);
+
+  // voice event listeners
+  useEffect(() => {
+    const unlistenTranscription = listen<{ text: string; is_final: boolean }>("voice:transcription", (event) => {
+      const { text, is_final } = event.payload;
+      if (is_final) {
+        const current = inputTextRef.current;
+        setInputText(current ? current + " " + text : text);
+        setVoiceText("");
+      } else {
+        setVoiceText(text);
+      }
+    });
+
+    const unlistenStopped = listen("voice:stopped", () => {
+      setIsVoiceActive(false);
+      setVoiceText("");
+    });
+
+    const unlistenError = listen<string>("voice:error", (event) => {
+      console.error("[voice] error:", event.payload);
+      setIsVoiceActive(false);
+      setVoiceText("");
+    });
+
+    return () => {
+      unlistenTranscription.then((f) => f());
+      unlistenStopped.then((f) => f());
+      unlistenError.then((f) => f());
+    };
+  }, [setInputText]);
+
+  const toggleVoice = async () => {
+    console.log("[voice] toggleVoice called, isVoiceActive:", isVoiceActive);
+    if (isVoiceActive) {
+      console.log("[voice] stopping...");
+      await invoke("stop_voice");
+      setIsVoiceActive(false);
+      setVoiceText("");
+    } else {
+      try {
+        console.log("[voice] starting...");
+        await invoke("start_voice");
+        console.log("[voice] started successfully");
+        setIsVoiceActive(true);
+      } catch (e) {
+        console.error("[voice] failed to start:", e);
+      }
+    }
+  };
 
   // auto-scroll on new messages
   useEffect(() => {
@@ -1019,12 +1080,12 @@ export default function ChatView({ variant }: ChatViewProps) {
           <div className="glass-card flex items-center gap-2 p-2">
             <textarea
               ref={inputRef}
-              value={inputText}
+              value={inputText + (voiceText ? (inputText ? " " : "") + voiceText : "")}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="what should I do?"
+              placeholder={isVoiceActive ? "listening..." : "what should I do?"}
               rows={1}
-              className="flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden"
+              className={`flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden ${isVoiceActive ? "italic" : ""}`}
               style={{ height: "24px" }}
               onInput={(e) => {
                 const target = e.target as HTMLTextAreaElement;
@@ -1032,6 +1093,19 @@ export default function ChatView({ variant }: ChatViewProps) {
                 target.style.height = Math.min(target.scrollHeight, 100) + "px";
               }}
             />
+            <motion.button
+              onClick={toggleVoice}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                isVoiceActive
+                  ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
+                  : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+              }`}
+              title={isVoiceActive ? "Stop recording" : "Start voice input"}
+            >
+              {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
+            </motion.button>
             <motion.button
               onClick={() => submit()}
               disabled={!inputText.trim()}

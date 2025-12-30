@@ -12,6 +12,7 @@ mod browser;
 mod computer;
 mod panels;
 mod storage;
+mod voice;
 
 use agent::{Agent, AgentMode, HistoryMessage};
 use std::sync::Arc;
@@ -447,6 +448,51 @@ mod storage_cmd {
     }
 }
 
+// --- voice IPC commands ---
+
+mod voice_cmd {
+    use crate::voice::VoiceSession;
+    use std::sync::Arc;
+    use tauri::State;
+
+    pub struct VoiceState {
+        pub session: Arc<VoiceSession>,
+    }
+
+    #[tauri::command]
+    pub async fn start_voice(
+        app_handle: tauri::AppHandle,
+        state: State<'_, VoiceState>,
+    ) -> Result<(), String> {
+        println!("[voice cmd] start_voice called");
+        let api_key = match std::env::var("DEEPGRAM_API_KEY") {
+            Ok(key) => {
+                println!("[voice cmd] got API key (len={})", key.len());
+                key
+            }
+            Err(e) => {
+                println!("[voice cmd] DEEPGRAM_API_KEY not found: {:?}", e);
+                return Err("DEEPGRAM_API_KEY not set in .env".to_string());
+            }
+        };
+        println!("[voice cmd] starting session...");
+        let result = state.session.start(api_key, app_handle).await;
+        println!("[voice cmd] session.start returned: {:?}", result);
+        result
+    }
+
+    #[tauri::command]
+    pub fn stop_voice(state: State<'_, VoiceState>) -> Result<(), String> {
+        state.session.stop();
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub fn is_voice_running(state: State<'_, VoiceState>) -> Result<bool, String> {
+        Ok(state.session.is_running())
+    }
+}
+
 fn main() {
     // load .env
     if dotenvy::dotenv().is_err() {
@@ -538,6 +584,9 @@ fn main() {
         .manage(AppState {
             agent: Arc::new(Mutex::new(agent)),
             running,
+        })
+        .manage(voice_cmd::VoiceState {
+            session: Arc::new(voice::VoiceSession::new()),
         })
         .setup(|app| {
             // hide from dock - menubar app only
@@ -781,6 +830,9 @@ fn main() {
             storage_cmd::save_conversation,
             storage_cmd::delete_conversation,
             storage_cmd::search_conversations,
+            voice_cmd::start_voice,
+            voice_cmd::stop_voice,
+            voice_cmd::is_voice_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

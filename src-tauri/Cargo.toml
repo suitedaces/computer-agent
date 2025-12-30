@@ -52,6 +52,11 @@ dirs = "5"
 chromiumoxide = { version = "0.8", features = ["tokio-runtime"] }
 futures = "0.3"
 
+# voice mode - mic capture + deepgram STT
+cpal = "0.15"
+deepgram = "0.7"
+bytes = "1"
+
 # allocator
 mimalloc = "0.1"
 
