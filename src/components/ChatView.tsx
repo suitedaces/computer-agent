@@ -721,66 +721,78 @@ function HistoryDropdown({ onNewChat, onLoad, disabled }: HistoryDropdownProps) 
       <button
         onClick={() => !disabled && setOpen(!open)}
         disabled={disabled}
-        className={`flex items-center gap-1.5 text-[11px] font-medium tracking-wide uppercase transition-colors ${
-          disabled ? "text-white/20 cursor-not-allowed" : "text-white/40 hover:text-white/70"
+        className={`flex items-center gap-2 px-2 py-1 rounded-md transition-colors ${
+          disabled
+            ? "text-white/20 cursor-not-allowed"
+            : open
+              ? "bg-white/10 text-white/80"
+              : "hover:bg-white/5 text-white/70 hover:text-white/90"
         }`}
       >
-        <span>taskhomie</span>
-        <ChevronDown size={10} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        <span className="text-[13px] font-semibold tracking-tight">taskhomie</span>
+        <ChevronDown size={12} className={`text-white/40 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.96 }}
-            transition={{ duration: 0.12 }}
-            className="absolute top-full left-0 mt-2 w-64 z-50 rounded-lg overflow-hidden"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.1 }}
+            className="absolute top-full left-0 mt-1.5 w-72 z-50 rounded-xl overflow-hidden"
             style={{
-              background: "rgba(0, 0, 0, 0.92)",
-              backdropFilter: "blur(24px) saturate(180%)",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08)",
+              background: "rgba(20, 20, 20, 0.95)",
+              backdropFilter: "blur(20px)",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              boxShadow: "0 12px 40px rgba(0, 0, 0, 0.6)",
             }}
           >
             {/* new chat button */}
             <button
               onClick={() => { onNewChat(); setOpen(false); }}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-[11px] text-white/70 hover:bg-white/8 transition-colors border-b border-white/8"
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-[12px] text-white/90 hover:bg-white/10 transition-colors"
             >
-              <Plus size={12} className="text-blue-400" />
-              <span>New conversation</span>
+              <div className="w-6 h-6 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                <Plus size={14} className="text-blue-400" />
+              </div>
+              <span className="font-medium">New chat</span>
             </button>
 
+            {/* divider with label */}
+            {conversations.length > 0 && (
+              <div className="px-3 py-1.5 border-t border-white/5">
+                <span className="text-[10px] text-white/30 uppercase tracking-wider">Recent</span>
+              </div>
+            )}
+
             {/* conversation list */}
-            <div className="max-h-[280px] overflow-y-auto">
+            <div className="max-h-[260px] overflow-y-auto">
               {loading ? (
-                <div className="px-3 py-4 text-[10px] text-white/30 text-center">Loading...</div>
+                <div className="px-3 py-6 text-[11px] text-white/40 text-center">Loading...</div>
               ) : conversations.length === 0 ? (
-                <div className="px-3 py-4 text-[10px] text-white/30 text-center">No conversations yet</div>
+                <div className="px-3 py-6 text-[11px] text-white/40 text-center border-t border-white/5">
+                  No conversations yet
+                </div>
               ) : (
-                conversations.map((conv, i) => (
-                  <motion.div
+                conversations.map((conv) => (
+                  <div
                     key={conv.id}
-                    initial={{ opacity: 0, x: -8 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.02 }}
-                    className="group flex items-center gap-2 px-3 py-2 hover:bg-white/6 transition-colors cursor-pointer"
+                    className="group flex items-center gap-2.5 px-3 py-2 hover:bg-white/8 transition-colors cursor-pointer"
                     onClick={() => handleLoad(conv.id)}
                   >
-                    <MessageSquare size={11} className="text-white/25 shrink-0" />
+                    <MessageSquare size={13} className="text-white/30 shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-[11px] text-white/80 truncate">{conv.title || "Untitled"}</p>
-                      <p className="text-[9px] text-white/30">{formatRelativeTime(conv.updated_at)} · {conv.message_count} msgs</p>
+                      <p className="text-[12px] text-white/80 truncate">{conv.title || "Untitled"}</p>
+                      <p className="text-[10px] text-white/40">{formatRelativeTime(conv.updated_at)} · {conv.message_count} msgs</p>
                     </div>
                     <button
                       onClick={(e) => handleDelete(e, conv.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 transition-all"
+                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-red-500/20 transition-all"
                     >
-                      <Trash2 size={10} className="text-red-400/70" />
+                      <Trash2 size={12} className="text-red-400/80" />
                     </button>
-                  </motion.div>
+                  </div>
                 ))
               )}
             </div>

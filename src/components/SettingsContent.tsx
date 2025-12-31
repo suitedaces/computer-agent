@@ -57,7 +57,7 @@ function PermissionRow({
               : "bg-red-400"
           }`}
         />
-        <span className="text-[13px] text-white/80">{label}</span>
+        <span className="text-[13px] text-white/90">{label}</span>
       </div>
       <div className="flex items-center gap-2">
         <span
@@ -114,8 +114,8 @@ function ApiKeyRow({
   return (
     <div className="flex items-center justify-between py-2.5">
       <div className="flex items-center gap-3">
-        <Key size={14} className="text-white/40" />
-        <span className="text-[13px] text-white/80">{label}</span>
+        <Key size={14} className="text-white/50" />
+        <span className="text-[13px] text-white/90">{label}</span>
       </div>
 
       {editing ? (
@@ -282,8 +282,8 @@ export default function SettingsContent() {
       {/* permissions */}
       <section>
         <div className="flex items-center gap-2 mb-2">
-          <Shield size={14} className="text-white/40" />
-          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+          <Shield size={14} className="text-white/50" />
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/50">
             Permissions
           </h3>
         </div>
@@ -316,8 +316,8 @@ export default function SettingsContent() {
       {/* api keys */}
       <section>
         <div className="flex items-center gap-2 mb-2">
-          <Key size={14} className="text-white/40" />
-          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+          <Key size={14} className="text-white/50" />
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/50">
             API Keys
           </h3>
         </div>
@@ -337,7 +337,7 @@ export default function SettingsContent() {
             </>
           )}
         </div>
-        <p className="text-[10px] text-white/30 mt-2 px-1">
+        <p className="text-[10px] text-white/40 mt-2 px-1">
           Keys are saved to .env in the app directory
         </p>
       </section>
@@ -345,13 +345,13 @@ export default function SettingsContent() {
       {/* browser profile */}
       <section>
         <div className="flex items-center gap-2 mb-2">
-          <Chrome size={14} className="text-white/40" />
-          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+          <Chrome size={14} className="text-white/50" />
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/50">
             Browser Profile
           </h3>
         </div>
         <div className="rounded-xl bg-white/[0.03] border border-white/5 p-4">
-          <p className="text-[12px] text-white/60 leading-relaxed mb-3">
+          <p className="text-[12px] text-white/70 leading-relaxed mb-3">
             A dedicated Chrome profile for automation. Log into sites here and
             the agent will use those sessions.
           </p>
@@ -359,8 +359,11 @@ export default function SettingsContent() {
           {profile?.exists && profile.sessions.length > 0 && (
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                  Sessions ({profile.sessions.length})
+                <span className="text-[10px] text-white/50 uppercase tracking-wider">
+                  Cookies ({profile.sessions.length})
+                </span>
+                <span className="text-[9px] text-white/35 italic">
+                  yes, ad trackers snuck in here too 🙄
                 </span>
               </div>
               <div className="max-h-[140px] overflow-y-auto rounded-lg bg-black/30 divide-y divide-white/10">
@@ -392,7 +395,7 @@ export default function SettingsContent() {
           <div className="flex gap-2">
             <button
               onClick={handleOpenProfile}
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white/70 hover:text-white/90 text-[12px] transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white/80 hover:text-white text-[12px] transition-colors"
             >
               <ExternalLink size={12} />
               Open in Chrome
@@ -417,16 +420,16 @@ export default function SettingsContent() {
       {/* shortcuts */}
       <section>
         <div className="flex items-center gap-2 mb-2">
-          <Keyboard size={14} className="text-white/40" />
-          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+          <Keyboard size={14} className="text-white/50" />
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/50">
             Shortcuts
           </h3>
         </div>
         <div className="rounded-xl bg-white/[0.03] border border-white/5 p-4 space-y-3">
           {shortcuts.map(({ keys, label }) => (
             <div key={keys} className="flex items-center justify-between">
-              <span className="text-[13px] text-white/80">{label}</span>
-              <kbd className="px-3 py-1 text-[12px] font-mono bg-white/10 rounded-md text-white/70 tracking-wider">
+              <span className="text-[13px] text-white/90">{label}</span>
+              <kbd className="px-3 py-1 text-[12px] font-mono bg-white/10 rounded-md text-white/80 tracking-wider">
                 {keys.split("").join(" ")}
               </kbd>
             </div>
