@@ -322,7 +322,7 @@ export default function MiniWindow() {
   // PTT recording - orb with streaming text, fully transparent
   if (pttRecording && !isRunning) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-transparent">
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -368,7 +368,7 @@ export default function MiniWindow() {
     };
 
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-transparent">
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}

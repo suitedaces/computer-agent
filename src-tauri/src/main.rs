@@ -625,6 +625,12 @@ fn main() {
                                         .ok();
                                 }
 
+                                // emit recording event BEFORE showing window so frontend renders PTT UI
+                                let _ = app.emit("ptt:recording", serde_json::json!({
+                                    "recording": true,
+                                    "sessionId": 0  // placeholder, real session id comes later
+                                }));
+
                                 // resize mini window for orb UI (200px orb + text below)
                                 #[cfg(target_os = "macos")]
                                 if let Some(panel) = MINI_PANEL.get() {
