@@ -70,7 +70,10 @@ function UrlLink({ url }: { url: string }) {
   );
 }
 interface ChatViewProps {
-  variant: "sidebar" | "spotlight" | "mini";
+  variant: "sidebar" | "spotlight" | "mini" | "compact";
+  settingsOpen?: boolean;
+  onSettingsClose?: () => void;
+  onCollapse?: () => void;
 }
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
@@ -778,7 +781,7 @@ function StreamingBubble() {
   );
 }
 
-export default function ChatView({ variant }: ChatViewProps) {
+export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSettingsClose, onCollapse }: ChatViewProps) {
   const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages, setVoiceMode, setConversationId } = useAgentStore();
   const { submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -791,15 +794,21 @@ export default function ChatView({ variant }: ChatViewProps) {
   const [usedVoiceInput, setUsedVoiceInput] = useState(false);
   const [showVoiceConfirm, setShowVoiceConfirm] = useState(false);
 
-  // settings panel state
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // settings panel state - use prop if provided (compact mode), otherwise internal state
+  const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
+  const settingsOpen = propSettingsOpen ?? internalSettingsOpen;
+  const setSettingsOpen = onSettingsClose
+    ? (open: boolean) => { if (!open) onSettingsClose(); }
+    : setInternalSettingsOpen;
 
   const isSpotlight = variant === "spotlight";
   const isMini = variant === "mini";
-  const panelClass = isMini ? "mini-panel" : isSpotlight ? "spotlight-panel" : "app-panel";
-  const padding = isMini ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
-  const inputPadding = isMini ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
-  const gifSize = isMini ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
+  const isCompact = variant === "compact";
+  const hideHeader = isMini; // only hide for mini, compact gets the full header
+  const panelClass = isMini ? "mini-panel" : isCompact ? "" : isSpotlight ? "spotlight-panel" : "app-panel";
+  const padding = isMini || isCompact ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
+  const inputPadding = isMini || isCompact ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
+  const gifSize = isMini || isCompact ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
 
   // ref to track current input for voice append
   const inputTextRef = useRef(inputText);
@@ -921,12 +930,25 @@ export default function ChatView({ variant }: ChatViewProps) {
   };
 
   const handleToggleView = () => {
+    // toggle view not applicable for compact mode
+    if (isCompact) return;
     if (isSpotlight) {
       invoke("hide_spotlight_window");
       invoke("show_main_window");
     } else {
       invoke("hide_main_window");
       invoke("show_spotlight_window");
+    }
+  };
+
+  const handleCollapse = () => {
+    if (onCollapse) {
+      onCollapse();
+    } else if (isSpotlight) {
+      invoke("hide_spotlight_window");
+      invoke("minimize_to_mini");
+    } else {
+      invoke("minimize_to_mini");
     }
   };
 
@@ -937,8 +959,8 @@ export default function ChatView({ variant }: ChatViewProps) {
       transition={{ duration: 0.12, ease: "easeOut" }}
       className={`h-screen flex flex-col ${panelClass} overflow-hidden`}
     >
-      {/* titlebar - hidden for mini */}
-      {!isMini && (
+      {/* titlebar - hidden for mini and compact */}
+      {!hideHeader && (
         <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
           {settingsOpen ? (
             <>
@@ -950,18 +972,17 @@ export default function ChatView({ variant }: ChatViewProps) {
                 <span>Settings</span>
               </button>
               <div className="flex items-center gap-2">
+                {!isCompact && (
+                  <button
+                    onClick={handleToggleView}
+                    className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+                    title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
+                  >
+                    {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  </button>
+                )}
                 <button
-                  onClick={handleToggleView}
-                  className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
-                  title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
-                >
-                  {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
-                <button
-                  onClick={() => {
-                    if (isSpotlight) invoke("hide_spotlight_window");
-                    invoke("minimize_to_mini");
-                  }}
+                  onClick={handleCollapse}
                   className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                   title="Collapse"
                 >
@@ -1002,18 +1023,17 @@ export default function ChatView({ variant }: ChatViewProps) {
                 >
                   <Settings size={14} />
                 </button>
+                {!isCompact && (
+                  <button
+                    onClick={handleToggleView}
+                    className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+                    title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
+                  >
+                    {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  </button>
+                )}
                 <button
-                  onClick={handleToggleView}
-                  className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
-                  title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
-                >
-                  {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
-                <button
-                  onClick={() => {
-                    if (isSpotlight) invoke("hide_spotlight_window");
-                    invoke("minimize_to_mini");
-                  }}
+                  onClick={handleCollapse}
                   className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                   title="Collapse"
                 >

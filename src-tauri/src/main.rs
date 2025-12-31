@@ -30,7 +30,6 @@ use tauri_nspanel::{
     tauri_panel, CollectionBehavior, ManagerExt, PanelLevel, StyleMask, WebviewWindowExt,
 };
 
-
 #[cfg(target_os = "macos")]
 tauri_panel! {
     panel!(TaskhomiePanel {
@@ -60,7 +59,7 @@ static SCREEN_INFO: std::sync::OnceLock<ScreenInfo> = std::sync::OnceLock::new()
 
 // re-export panel handles from shared module
 #[cfg(target_os = "macos")]
-use panels::{MAIN_PANEL, MINI_PANEL, SPOTLIGHT_PANEL, BORDER_PANEL};
+use panels::{MAIN_PANEL, VOICE_PANEL, BORDER_PANEL};
 
 #[cfg(target_os = "macos")]
 fn get_screen_info() -> &'static ScreenInfo {
@@ -97,11 +96,10 @@ fn position_window_top_right(window: &tauri::WebviewWindow, width: f64, _height:
 }
 
 #[cfg(target_os = "macos")]
-fn position_window_center(window: &tauri::WebviewWindow, width: f64, _height: f64) {
+fn position_window_center(window: &tauri::WebviewWindow, width: f64, height: f64) {
     let info = get_screen_info();
     let x = ((info.width - width) / 2.0) * info.scale;
-    // center vertically in visible area (below menubar)
-    let y = ((info.menubar_height + 300.0)) * info.scale;
+    let y = ((info.height - height) / 2.0) * info.scale;
     let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
 }
 
@@ -174,155 +172,66 @@ fn debug_log(message: String) {
     println!("[frontend] {}", message);
 }
 
+// unified window state command - frontend tells backend what size/position it needs
 #[tauri::command]
-fn show_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+fn set_window_state(app_handle: tauri::AppHandle, width: f64, height: f64, centered: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    if let Some(panel) = MINI_PANEL.get() {
-        // always resize to idle bar (needed when returning from help mode)
-        if let Some(window) = app_handle.get_webview_window("mini") {
-            let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
-            position_window_top_right(&window, 280.0, 36.0);
+    {
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
+            if centered {
+                position_window_center(&window, width, height);
+            } else {
+                // for non-centered (idle/expanded), keep at top-right or preserve position
+                // only reposition if window is at default location
+                position_window_top_right(&window, width, height);
+            }
+            if let Some(panel) = MAIN_PANEL.get() {
+                panel.show();
+            }
         }
-        panel.show();
     }
     #[cfg(not(target_os = "macos"))]
-    if let Some(window) = app_handle.get_webview_window("mini") {
-        let _ = window.show();
+    {
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
+            let _ = window.show();
+        }
     }
     Ok(())
 }
 
+// voice window controls
 #[tauri::command]
-fn hide_mini_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
+fn show_voice_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    if let Some(panel) = MINI_PANEL.get() {
-        panel.hide();
-    }
-    #[cfg(not(target_os = "macos"))]
-    if let Some(window) = _app_handle.get_webview_window("mini") {
-        let _ = window.hide();
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn position_mini_window(app_handle: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    if let Some(window) = app_handle.get_webview_window("mini") {
-        let _ = window.set_size(tauri::LogicalSize::new(width, height));
-        position_window_top_right(&window, width, height);
-        if let Some(panel) = MINI_PANEL.get() {
+    {
+        if let Some(window) = app_handle.get_webview_window("voice") {
+            position_window_center(&window, 300.0, 300.0);
+        }
+        if let Some(panel) = VOICE_PANEL.get() {
             panel.show();
         }
     }
     #[cfg(not(target_os = "macos"))]
-    if let Some(window) = app_handle.get_webview_window("mini") {
-        let _ = window.set_size(tauri::LogicalSize::new(width, height));
-        let _ = window.show();
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
     {
-        if let Some(mini_panel) = MINI_PANEL.get() {
-            mini_panel.hide();
-        }
-        if let Some(panel) = MAIN_PANEL.get() {
-            if !panel.is_visible() {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    position_window_top_right(&window, 420.0, 600.0);
-                }
-            }
-            panel.show_and_make_key();
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(mini) = app_handle.get_webview_window("mini") {
-            let _ = mini.hide();
-        }
-        if let Some(window) = app_handle.get_webview_window("main") {
+        if let Some(window) = app_handle.get_webview_window("voice") {
+            let _ = window.center();
             let _ = window.show();
-            let _ = window.set_focus();
         }
     }
     Ok(())
 }
 
 #[tauri::command]
-fn hide_main_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
+fn hide_voice_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    if let Some(panel) = MAIN_PANEL.get() {
+    if let Some(panel) = VOICE_PANEL.get() {
         panel.hide();
     }
     #[cfg(not(target_os = "macos"))]
-    if let Some(window) = _app_handle.get_webview_window("main") {
+    if let Some(window) = _app_handle.get_webview_window("voice") {
         let _ = window.hide();
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn show_spotlight_window(app_handle: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        // hide other windows
-        if let Some(mini_panel) = MINI_PANEL.get() {
-            mini_panel.hide();
-        }
-        if let Some(main_panel) = MAIN_PANEL.get() {
-            main_panel.hide();
-        }
-        // position and show spotlight centered
-        if let Some(panel) = SPOTLIGHT_PANEL.get() {
-            if let Some(window) = app_handle.get_webview_window("spotlight") {
-                position_window_center(&window, 800.0, 560.0);
-            }
-            panel.show_and_make_key();
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(window) = app_handle.get_webview_window("spotlight") {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn hide_spotlight_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    if let Some(panel) = SPOTLIGHT_PANEL.get() {
-        panel.hide();
-    }
-    #[cfg(not(target_os = "macos"))]
-    if let Some(window) = _app_handle.get_webview_window("spotlight") {
-        let _ = window.hide();
-    }
-    Ok(())
-}
-
-// trigger screen flash effect - plays sound as feedback
-#[cfg(target_os = "macos")]
-fn trigger_screen_flash() {
-    // play screenshot sound in background
-    std::process::Command::new("afplay")
-        .arg("/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Grab.aif")
-        .spawn()
-        .ok();
-}
-
-// set mini panel click-through (ignores mouse events)
-#[tauri::command]
-fn set_mini_click_through(ignore: bool) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    if let Some(panel) = MINI_PANEL.get() {
-        panel.set_ignores_mouse_events(ignore);
     }
     Ok(())
 }
@@ -332,16 +241,6 @@ fn set_mini_click_through(ignore: bool) -> Result<(), String> {
 fn set_main_click_through(ignore: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     if let Some(panel) = MAIN_PANEL.get() {
-        panel.set_ignores_mouse_events(ignore);
-    }
-    Ok(())
-}
-
-// set spotlight panel click-through (ignores mouse events)
-#[tauri::command]
-fn set_spotlight_click_through(ignore: bool) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    if let Some(panel) = SPOTLIGHT_PANEL.get() {
         panel.set_ignores_mouse_events(ignore);
     }
     Ok(())
@@ -378,59 +277,25 @@ fn take_screenshot_excluding_app() -> Result<String, String> {
     }
 }
 
-// move mini window to top-right corner (after help mode submit)
-#[tauri::command]
-fn move_mini_to_corner(app_handle: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    if let Some(window) = app_handle.get_webview_window("mini") {
-        let _ = window.set_size(tauri::LogicalSize::new(340.0, 300.0));
-        position_window_top_right(&window, 340.0, 300.0);
-    }
-    Ok(())
+// trigger screen flash effect - plays sound as feedback
+#[cfg(target_os = "macos")]
+fn trigger_screen_flash() {
+    std::process::Command::new("afplay")
+        .arg("/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Grab.aif")
+        .spawn()
+        .ok();
 }
 
 // hotkey triggered - capture screenshot and return base64
 #[tauri::command]
 fn capture_screen_for_help() -> Result<String, String> {
-    // capture first (fast)
     let control = computer::ComputerControl::new().map_err(|e| e.to_string())?;
     let screenshot = control.take_screenshot().map_err(|e| e.to_string())?;
 
-    // then play sound as feedback
     #[cfg(target_os = "macos")]
     trigger_screen_flash();
 
     Ok(screenshot)
-}
-
-#[tauri::command]
-fn minimize_to_mini(app_handle: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        // use cached panel handles - no mutex lock needed
-        if let Some(main_panel) = MAIN_PANEL.get() {
-            main_panel.hide();
-        }
-        if let Some(mini_panel) = MINI_PANEL.get() {
-            if !mini_panel.is_visible() {
-                if let Some(window) = app_handle.get_webview_window("mini") {
-                    let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
-                    position_window_top_right(&window, 280.0, 36.0);
-                }
-            }
-            mini_panel.show();
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(main) = app_handle.get_webview_window("main") {
-            let _ = main.hide();
-        }
-        if let Some(mini) = app_handle.get_webview_window("mini") {
-            let _ = mini.show();
-        }
-    }
-    Ok(())
 }
 
 // --- storage IPC commands ---
@@ -533,7 +398,6 @@ mod voice_cmd {
     ) -> Result<(), String> {
         println!("[ptt cmd] start_ptt called");
 
-        // store screenshot for later
         if let Some(ss) = screenshot {
             *state.screenshot.lock().unwrap() = Some(ss);
         }
@@ -613,7 +477,6 @@ fn main() {
                                 println!("[ptt] pressed - starting recording (mode: {})", mode);
 
                                 // capture screenshot only for computer mode
-                                // browser mode uses a11y tree, screenshots are redundant
                                 let screenshot = if mode == "computer" {
                                     panels::take_screenshot_excluding_app_sync().ok()
                                 } else {
@@ -629,26 +492,13 @@ fn main() {
                                         .ok();
                                 }
 
-                                // emit recording event BEFORE showing window so frontend renders PTT UI
+                                // emit recording event with screenshot and mode
                                 let _ = app.emit("ptt:recording", serde_json::json!({
                                     "recording": true,
-                                    "sessionId": 0  // placeholder, real session id comes later
+                                    "screenshot": screenshot,
+                                    "mode": mode,
+                                    "sessionId": 0
                                 }));
-
-                                // resize mini window for orb UI (200px orb + text below)
-                                #[cfg(target_os = "macos")]
-                                if let Some(panel) = MINI_PANEL.get() {
-                                    if let Some(window) = app.get_webview_window("mini") {
-                                        let _ = window.set_size(tauri::LogicalSize::new(300.0, 300.0));
-                                        position_window_center(&window, 300.0, 300.0);
-                                    }
-                                    panel.show();
-                                }
-                                #[cfg(not(target_os = "macos"))]
-                                if let Some(window) = app.get_webview_window("mini") {
-                                    let _ = window.set_size(tauri::LogicalSize::new(300.0, 300.0));
-                                    let _ = window.show();
-                                }
 
                                 // start PTT recording via command
                                 let app_clone = app.clone();
@@ -673,7 +523,6 @@ fn main() {
                                         match ptt_state.session.start(api_key, app_clone.clone()).await {
                                             Ok(session_id) => {
                                                 *ptt_state.current_session_id.lock().unwrap() = session_id;
-                                                // emit recording event with session id
                                                 let _ = app_clone.emit("ptt:recording", serde_json::json!({
                                                     "recording": true,
                                                     "sessionId": session_id
@@ -708,7 +557,6 @@ fn main() {
                                         let screenshot = ptt_state.screenshot.lock().unwrap().take();
                                         let mode = ptt_state.mode.lock().unwrap().take();
 
-                                        // check for stale result
                                         if result_session_id != expected_session_id {
                                             println!("[ptt] stale result ignored: got session {} but expected {}", result_session_id, expected_session_id);
                                             return;
@@ -741,13 +589,11 @@ fn main() {
 
                                         println!("[ptt] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
 
-                                        // emit recording=false right before result so UI doesn't flash to idle bar
                                         let _ = app_clone.emit("ptt:recording", serde_json::json!({
                                             "recording": false,
                                             "sessionId": result_session_id
                                         }));
 
-                                        // emit result event with mode and session id
                                         let _ = app_clone.emit("ptt:result", serde_json::json!({
                                             "text": text,
                                             "screenshot": screenshot,
@@ -768,29 +614,11 @@ fn main() {
 
                     // Cmd+Shift+H - help mode (screenshot + prompt)
                     if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyH) {
-                        // capture screenshot first (excluding app windows)
-                        // use _sync version since shortcut handlers run on main thread
                         let screenshot = panels::take_screenshot_excluding_app_sync().ok();
 
-                        // play shutter sound
                         #[cfg(target_os = "macos")]
                         trigger_screen_flash();
 
-                        // resize window BEFORE emitting to frontend
-                        #[cfg(target_os = "macos")]
-                        if let Some(panel) = MINI_PANEL.get() {
-                            if let Some(window) = app.get_webview_window("mini") {
-                                let _ = window.set_size(tauri::LogicalSize::new(520.0, 420.0));
-                                position_window_center(&window, 520.0, 420.0);
-                            }
-                            panel.show();
-                        }
-                        #[cfg(not(target_os = "macos"))]
-                        if let Some(window) = app.get_webview_window("mini") {
-                            let _ = window.show();
-                        }
-
-                        // emit after window is ready
                         let _ = app.emit("hotkey-help", serde_json::json!({ "screenshot": screenshot }));
                     }
 
@@ -834,12 +662,10 @@ fn main() {
             // hide from dock - menubar app only
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // convert windows to panels and cache handles for instant access
             #[cfg(target_os = "macos")]
             {
                 // main panel
                 if let Some(window) = app.get_webview_window("main") {
-                    // pre-position offscreen to avoid flicker on first show
                     let _ = window.set_position(PhysicalPosition::new(-1000, -1000));
 
                     if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
@@ -853,48 +679,12 @@ fn main() {
                                 .into(),
                         );
                         panel.set_hides_on_deactivate(false);
-                        // cache for instant access
                         let _ = MAIN_PANEL.set(panel);
                     }
                 }
 
-                // mini panel
-                if let Some(window) = app.get_webview_window("mini") {
-                    // ensure mini window has ?mini=true in URL (for dev mode)
-                    if let Ok(url) = window.url() {
-                        if !url.to_string().contains("mini") {
-                            let new_url = format!("{}?mini=true", url);
-                            let _ = window.eval(&format!("window.location.href = '{}'", new_url));
-                        }
-                    }
-
-                    if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
-                        panel.set_level(PanelLevel::Floating.value());
-                        panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
-                        panel.set_collection_behavior(
-                            CollectionBehavior::new()
-                                .full_screen_auxiliary()
-                                .can_join_all_spaces()
-                                .stationary()
-                                .into(),
-                        );
-                        panel.set_hides_on_deactivate(false);
-                        // cache for instant access
-                        let _ = MINI_PANEL.set(panel);
-                    }
-                }
-
-                // spotlight panel
-                if let Some(window) = app.get_webview_window("spotlight") {
-                    // ensure spotlight window has ?spotlight=true in URL (for dev mode)
-                    if let Ok(url) = window.url() {
-                        if !url.to_string().contains("spotlight") {
-                            let new_url = format!("{}?spotlight=true", url);
-                            let _ = window.eval(&format!("window.location.href = '{}'", new_url));
-                        }
-                    }
-
-                    // position offscreen initially
+                // voice panel
+                if let Some(window) = app.get_webview_window("voice") {
                     let _ = window.set_position(PhysicalPosition::new(-1000, -1000));
 
                     if let Ok(panel) = window.to_panel::<TaskhomiePanel>() {
@@ -908,22 +698,12 @@ fn main() {
                                 .into(),
                         );
                         panel.set_hides_on_deactivate(false);
-                        // cache for instant access
-                        let _ = SPOTLIGHT_PANEL.set(panel);
+                        let _ = VOICE_PANEL.set(panel);
                     }
                 }
 
-                // border panel - fullscreen overlay for agent active state
+                // border panel
                 if let Some(window) = app.get_webview_window("border") {
-                    // ensure border window has ?border=true in URL
-                    if let Ok(url) = window.url() {
-                        if !url.to_string().contains("border") {
-                            let new_url = format!("{}?border=true", url);
-                            let _ = window.eval(&format!("window.location.href = '{}'", new_url));
-                        }
-                    }
-
-                    // set to fullscreen size
                     let info = get_screen_info();
                     let _ = window.set_size(tauri::LogicalSize::new(info.width, info.height));
                     let _ = window.set_position(PhysicalPosition::new(0, 0));
@@ -940,26 +720,20 @@ fn main() {
                                 .into(),
                         );
                         panel.set_hides_on_deactivate(false);
-                        // always click-through - only renders visual border
                         panel.set_ignores_mouse_events(true);
-                        // cache for instant access
                         let _ = BORDER_PANEL.set(panel);
                     }
                 }
-            }
 
-            // show mini at top right after setup (idle size: 280x36 logical)
-            #[cfg(target_os = "macos")]
-            {
-                if let Some(window) = app.get_webview_window("mini") {
-                    let _ = window.set_size(tauri::LogicalSize::new(280.0, 36.0));
-                    position_window_top_right(&window, 280.0, 36.0);
-                    if let Some(panel) = MINI_PANEL.get() {
+                // show main window at startup (idle size)
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_size(tauri::LogicalSize::new(280.0, 40.0));
+                    position_window_top_right(&window, 280.0, 40.0);
+                    if let Some(panel) = MAIN_PANEL.get() {
                         panel.show();
                     }
                 }
             }
-
 
             // tray menu with quit option
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -986,40 +760,21 @@ fn main() {
 
                         #[cfg(target_os = "macos")]
                         {
-                            let main_visible = app.get_webview_panel("main").map(|p| p.is_visible()).unwrap_or(false);
-                            let mini_visible = app.get_webview_panel("mini").map(|p| p.is_visible()).unwrap_or(false);
+                            let main_visible = MAIN_PANEL.get().map(|p| p.is_visible()).unwrap_or(false);
 
                             if main_visible {
-                                // uncollapsed -> collapsed: hide main, show mini (idle size)
-                                if let Ok(main_panel) = app.get_webview_panel("main") {
-                                    main_panel.hide();
-                                }
-                                if let Ok(mini_panel) = app.get_webview_panel("mini") {
-                                    if let Some(mini_window) = app.get_webview_window("mini") {
-                                        let _ = mini_window.set_size(tauri::LogicalSize::new(280.0, 36.0));
-                                        position_window_top_right(&mini_window, 280.0, 36.0);
-                                    }
-                                    mini_panel.show();
-                                }
-                            } else if mini_visible {
-                                // collapsed -> uncollapsed: hide mini, show main
-                                if let Ok(mini_panel) = app.get_webview_panel("mini") {
-                                    mini_panel.hide();
-                                }
-                                if let Ok(main_panel) = app.get_webview_panel("main") {
-                                    if let Some(main_window) = app.get_webview_window("main") {
-                                        position_window_top_right(&main_window, 420.0, 600.0);
-                                    }
-                                    main_panel.show_and_make_key();
+                                // hide main
+                                if let Some(panel) = MAIN_PANEL.get() {
+                                    panel.hide();
                                 }
                             } else {
-                                // nothing visible -> show collapsed (mini, idle size)
-                                if let Ok(mini_panel) = app.get_webview_panel("mini") {
-                                    if let Some(mini_window) = app.get_webview_window("mini") {
-                                        let _ = mini_window.set_size(tauri::LogicalSize::new(280.0, 36.0));
-                                        position_window_top_right(&mini_window, 280.0, 36.0);
-                                    }
-                                    mini_panel.show();
+                                // show main at idle size
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.set_size(tauri::LogicalSize::new(280.0, 40.0));
+                                    position_window_top_right(&window, 280.0, 40.0);
+                                }
+                                if let Some(panel) = MAIN_PANEL.get() {
+                                    panel.show();
                                 }
                             }
                         }
@@ -1039,10 +794,7 @@ fn main() {
             Ok(())
         })
         .on_window_event(|_window, _event| {
-            // disabled auto-hide for now - interferes with agent running
-            // if let tauri::WindowEvent::Focused(false) = event {
-            //     let _ = window.hide();
-            // }
+            // disabled auto-hide for now
         })
         .invoke_handler(tauri::generate_handler![
             set_api_key,
@@ -1051,22 +803,14 @@ fn main() {
             stop_agent,
             is_agent_running,
             debug_log,
-            show_mini_window,
-            hide_mini_window,
-            position_mini_window,
-            show_main_window,
-            hide_main_window,
-            show_spotlight_window,
-            hide_spotlight_window,
-            minimize_to_mini,
-            capture_screen_for_help,
-            move_mini_to_corner,
-            set_mini_click_through,
+            set_window_state,
+            show_voice_window,
+            hide_voice_window,
             set_main_click_through,
-            set_spotlight_click_through,
             show_border_overlay,
             hide_border_overlay,
             take_screenshot_excluding_app,
+            capture_screen_for_help,
             storage_cmd::list_conversations,
             storage_cmd::load_conversation,
             storage_cmd::create_conversation,

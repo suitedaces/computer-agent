@@ -12,7 +12,7 @@ const shouldAutoplayAudio = (() => {
   if (typeof window === "undefined") return true;
   const params = new URLSearchParams(window.location.search);
   // only the main window should auto-play to avoid duplicate audio across windows
-  return !params.has("mini") && !params.has("spotlight") && !params.has("border");
+  return !params.has("voice") && !params.has("border");
 })();
 
 let listenersAttached = false;
@@ -38,8 +38,6 @@ function attachListeners() {
         s.setIsRunning(true);
         if (mode === "computer") {
           invoke("set_main_click_through", { ignore: true }).catch(() => {});
-          invoke("set_mini_click_through", { ignore: true }).catch(() => {});
-          invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
           invoke("show_border_overlay").catch(() => {});
         }
         break;
@@ -79,16 +77,12 @@ function attachListeners() {
       case "finished":
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
-        invoke("set_mini_click_through", { ignore: false }).catch(() => {});
-        invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
         break;
 
       case "error":
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
-        invoke("set_mini_click_through", { ignore: false }).catch(() => {});
-        invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
         s.addMessage({ role: "assistant", content: message, type: "error" });
         break;
