@@ -297,6 +297,7 @@ export default function SettingsContent() {
   };
 
   const shortcuts = [
+    { keys: "⌘⇧␣", label: "Spotlight" },
     { keys: "⌘⇧H", label: "Screenshot + Ask" },
     { keys: "⌘⇧V", label: "Push-to-Talk" },
     { keys: "⌃⇧C", label: "Voice → Computer Mode" },

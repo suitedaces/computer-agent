@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
-import { queueAudio, playClickSound, playTypeSound, playDoneSound } from "../utils/audio";
+import { queueAudio, playClickSound, playTypeSound, playDoneSound, playScreenshotSound, startAmbientSound, stopAmbientSound, pauseAmbientSound, resumeAmbientSound } from "../utils/audio";
 import { formatToolMessage, ToolInput } from "../utils/toolFormat";
 
 type UnlistenFn = () => void;
@@ -69,8 +69,8 @@ function attachListeners() {
           });
 
           // play subtle sounds for actions (computer and browser tools)
-          // skip in voice mode - TTS provides audio feedback
-          if (shouldAutoplayAudio && !s.voiceMode) {
+          // in voice mode: still play action sounds, they provide good feedback
+          if (shouldAutoplayAudio) {
             const action = formatted.action?.action;
             const content = formatted.content.toLowerCase();
 
@@ -94,13 +94,16 @@ function attachListeners() {
 
       case "screenshot":
         s.markLastActionComplete(screenshot);
+        if (shouldAutoplayAudio) {
+          playScreenshotSound();
+        }
         break;
 
       case "finished":
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
-        // play completion chime (only if not in voice mode - TTS provides feedback)
+        // play completion chime (skip in voice mode - TTS is the feedback)
         if (shouldAutoplayAudio && !s.voiceMode) {
           playDoneSound();
         }

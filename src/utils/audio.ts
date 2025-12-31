@@ -80,6 +80,100 @@ export function playDoneSound() {
   });
 }
 
+// messenger-style ambient blip - soft bubbly sound while agent works
+let ambientInterval: ReturnType<typeof setInterval> | null = null;
+let ambientPaused = false;
+
+function playBloop() {
+  if (ambientPaused) return;
+
+  const ctx = getAudioContext();
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  // rising pitch = bubbly/friendly feel
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(600, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.06);
+
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.04, ctx.currentTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.12);
+}
+
+export function startAmbientSound() {
+  if (ambientInterval) return;
+  ambientPaused = false;
+
+  // bloop every 1.2 seconds
+  ambientInterval = setInterval(() => {
+    playBloop();
+  }, 1200);
+}
+
+export function stopAmbientSound() {
+  if (ambientInterval) {
+    clearInterval(ambientInterval);
+    ambientInterval = null;
+  }
+  ambientPaused = false;
+}
+
+export function pauseAmbientSound() {
+  ambientPaused = true;
+}
+
+export function resumeAmbientSound() {
+  ambientPaused = false;
+}
+
+// camera shutter sound for screenshots
+export function playScreenshotSound() {
+  try {
+    const ctx = getAudioContext();
+
+    // short burst of white noise for shutter effect
+    const bufferSize = ctx.sampleRate * 0.08;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      // noise with quick decay
+      const decay = 1 - i / bufferSize;
+      data[i] = (Math.random() * 2 - 1) * decay * decay;
+    }
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(2000, ctx.currentTime);
+    filter.Q.setValueAtTime(1, ctx.currentTime);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+
+    noise.start();
+    noise.stop(ctx.currentTime + 0.08);
+  } catch (e) {
+    console.error("[audio] screenshot error:", e);
+  }
+}
+
 let currentAudio: HTMLAudioElement | null = null;
 const audioQueue: string[] = [];
 let isPlaying = false;
