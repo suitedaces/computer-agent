@@ -272,9 +272,14 @@ impl Agent {
             });
         }
 
-        // add text instructions
+        // add text instructions - wrap in voice_input tags if voice mode
+        let text_content = if voice_mode {
+            format!("<voice_input>{}</voice_input>", instructions)
+        } else {
+            instructions.clone()
+        };
         user_content.push(ContentBlock::Text {
-            text: instructions.clone(),
+            text: text_content,
         });
 
         let user_message = Message {

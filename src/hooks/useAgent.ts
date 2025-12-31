@@ -153,7 +153,6 @@ export function useAgent() {
     inputText,
     selectedModel,
     selectedMode,
-    voiceMode,
     messages,
     conversationId,
     setIsRunning,
@@ -191,15 +190,18 @@ export function useAgent() {
     // use override mode if provided, otherwise use selected mode
     const mode = overrideMode ?? selectedMode;
 
+    // read fresh voiceMode from store to avoid stale closure
+    const currentVoiceMode = useAgentStore.getState().voiceMode;
+
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode, voiceMode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode, voiceMode: currentVoiceMode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
     } catch (error) {
       // on early failure, show the user message so they know what failed
       addMessage({ role: "user", content: text });
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, selectedModel, selectedMode, voiceMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
+  }, [inputText, isRunning, selectedModel, selectedMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {

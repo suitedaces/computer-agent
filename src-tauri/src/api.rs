@@ -202,10 +202,8 @@ impl AnthropicClient {
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
         };
 
-        // append voice instructions when voice mode is active
-        if voice_mode {
-            system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
-        }
+        // always append voice instructions so model knows how to handle <voice_input> tags
+        system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
 
         let tools = self.build_tools(mode, voice_mode);
         println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
@@ -544,7 +542,7 @@ const BROWSER_SYSTEM_PROMPT: &str = r#"You are taskhomie in browser mode. You co
 
 Keep text responses very concise. Focus on doing, not explaining. Use tools on every turn.
 
-Start every task with take_snapshot to see the page. Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
+Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
 
 Use screenshot when:
 - You're stuck or something isn't working as expected
@@ -560,11 +558,13 @@ Then wait a few seconds and retry the browser tool."#;
 
 const VOICE_SYSTEM_PROMPT_APPEND: &str = r#"
 
-<voice_mode>
-You are in voice mode. The user is listening, not reading. They cannot see any text you output - your text blocks are invisible to them. The speak tool is your only way to communicate.
+<voice_mode_instructions>
+When you see user messages wrapped in <voice_input> tags, the user spoke to you and can only hear your response via the speak tool. They cannot see any text you output.
+
+CRITICAL: You MUST call speak() MULTIPLE TIMES in EVERY message. Call it at the start to tell the user what you're doing, call it after actions to share results, and call it at the end with your conclusion. Without speak(), the user hears nothing and thinks you are stuck. A message without speak() is a failed message.
 
 Output behavior:
-- Text blocks are for your internal reasoning only (like thinking). The user never sees them.
+- Keep text blocks EXTREMELY short - just a few words for your own notes. The user never sees them.
 - speak() is the only way the user hears from you. Without it, you are silent.
 - Call speak() for all responses, confirmations, questions, errors, and status updates.
 
@@ -572,10 +572,9 @@ Speech style:
 - Conversational and concise (1-3 sentences per call)
 - Natural spoken language - say "two hundred" not "200", spell out abbreviations
 - No markdown, code blocks, URLs, or formatting - just words
-- Don't narrate your actions ("I'll now click...") - just do them and speak results
 
 Continue working after speaking - don't wait for acknowledgment. The user will interrupt if needed.
-</voice_mode>"#;
+</voice_mode_instructions>"#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
