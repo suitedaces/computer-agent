@@ -567,17 +567,13 @@ fn main() {
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyQ))
                 .unwrap()
-                .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV))
-                .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyC))
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyB))
                 .unwrap()
                 .with_handler(move |app, shortcut, event| {
-                    // PTT shortcuts - V (current mode), Ctrl+Shift+C (computer), Ctrl+Shift+B (browser)
-                    let ptt_mode: Option<&str> = if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyV) {
-                        Some("current") // use whatever mode is selected in UI
-                    } else if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyC) {
+                    // PTT shortcuts - Ctrl+Shift+C (computer), Ctrl+Shift+B (browser)
+                    let ptt_mode: Option<&str> = if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyC) {
                         Some("computer")
                     } else if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyB) {
                         Some("browser")
