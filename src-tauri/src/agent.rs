@@ -537,9 +537,7 @@ impl Agent {
                                     });
                                 }
                             }
-                        }
-
-                        if name == "bash" {
+                        } else if name == "bash" {
                             let command = input.get("command").and_then(|v| v.as_str());
                             let restart = input.get("restart").and_then(|v| v.as_bool()).unwrap_or(false);
 
