@@ -202,8 +202,10 @@ impl AnthropicClient {
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
         };
 
-        // always append voice instructions so model knows how to handle <voice_input> tags
-        system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
+        // only append voice instructions when voice mode is enabled (speak tool available)
+        if voice_mode {
+            system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
+        }
 
         let tools = self.build_tools(mode, voice_mode);
         println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
