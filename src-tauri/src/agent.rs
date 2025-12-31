@@ -250,12 +250,20 @@ impl Agent {
         });
         println!("[agent] Emitted started + user_message events");
 
-        // add conversation history first
-        for msg in history {
-            messages.push(Message {
-                role: msg.role,
-                content: vec![ContentBlock::Text { text: msg.content }],
-            });
+        // load history: prefer DB conversation (has full tool_use/tool_result),
+        // fall back to frontend history for new conversations
+        if !conversation.messages.is_empty() {
+            // resuming existing conversation - use DB messages which include tool blocks
+            println!("[agent] Using {} messages from DB conversation", conversation.messages.len());
+            messages = conversation.messages.clone();
+        } else {
+            // new conversation - use frontend history (lossy but ok for first message)
+            for msg in history {
+                messages.push(Message {
+                    role: msg.role,
+                    content: vec![ContentBlock::Text { text: msg.content }],
+                });
+            }
         }
 
         // build user message content - include screenshot if provided
@@ -681,6 +689,15 @@ impl Agent {
                                     });
                                 }
                             }
+                        } else {
+                            // unknown tool - return error so API contract is satisfied
+                            println!("[agent] Unknown tool called: {}", name);
+                            tool_results.push(ContentBlock::ToolResult {
+                                tool_use_id: id.clone(),
+                                content: vec![ToolResultContent::Text {
+                                    text: format!("Error: Unknown tool '{}'. Use the available tools: computer, bash, speak.", name),
+                                }],
+                            });
                         }
                     }
 
