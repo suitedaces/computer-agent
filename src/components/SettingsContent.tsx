@@ -12,6 +12,7 @@ import {
   RefreshCw,
   X,
   Loader2,
+  Mic,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -30,6 +31,11 @@ interface BrowserProfileStatus {
 interface ApiKeyStatus {
   anthropic: boolean;
   deepgram: boolean;
+  elevenlabs: boolean;
+}
+
+interface VoiceSettings {
+  elevenlabsVoiceId: string | null;
 }
 
 function PermissionRow({
@@ -193,24 +199,40 @@ function LoadingSkeleton() {
   );
 }
 
+const VOICE_PRESETS = [
+  { id: "NOpBlnGInO9m6vDvFkFC", name: "Southern Grandpa (Default)" },
+  { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel" },
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Bella" },
+  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam" },
+  { id: "yoZ06aMxZJJ28mfd3POQ", name: "Sam" },
+  { id: "jBpfuIE2acCO8z3wKNLl", name: "Gigi" },
+];
+
+const DEFAULT_VOICE_ID = "NOpBlnGInO9m6vDvFkFC";
+
 export default function SettingsContent() {
   const [permissions, setPermissions] = useState<PermissionsCheck | null>(null);
   const [profile, setProfile] = useState<BrowserProfileStatus | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKeyStatus | null>(null);
+  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings | null>(null);
   const [resetting, setResetting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editingVoiceId, setEditingVoiceId] = useState(false);
+  const [voiceIdInput, setVoiceIdInput] = useState("");
 
   useEffect(() => {
     const check = async () => {
       try {
-        const [perms, prof, keys] = await Promise.all([
+        const [perms, prof, keys, voice] = await Promise.all([
           invoke<PermissionsCheck>("check_permissions"),
           invoke<BrowserProfileStatus>("get_browser_profile_status"),
           invoke<ApiKeyStatus>("get_api_key_status"),
+          invoke<VoiceSettings>("get_voice_settings"),
         ]);
         setPermissions(perms);
         setProfile(prof);
         setApiKeys(keys);
+        setVoiceSettings(voice);
       } catch (e) {
         console.error("Failed to check status:", e);
       } finally {
@@ -262,6 +284,16 @@ export default function SettingsContent() {
     await invoke("save_api_key", { service, key });
     const keys = await invoke<ApiKeyStatus>("get_api_key_status");
     setApiKeys(keys);
+  };
+
+  const handleSaveVoiceId = async () => {
+    if (voiceIdInput.trim()) {
+      await invoke("save_voice_settings", { voiceId: voiceIdInput.trim() });
+      const voice = await invoke<VoiceSettings>("get_voice_settings");
+      setVoiceSettings(voice);
+      setVoiceIdInput("");
+      setEditingVoiceId(false);
+    }
   };
 
   const shortcuts = [
@@ -334,12 +366,95 @@ export default function SettingsContent() {
                 isSet={apiKeys.deepgram}
                 onSave={(key) => handleSaveApiKey("deepgram", key)}
               />
+              <ApiKeyRow
+                label="ElevenLabs"
+                isSet={apiKeys.elevenlabs}
+                onSave={(key) => handleSaveApiKey("elevenlabs", key)}
+              />
             </>
           )}
         </div>
         <p className="text-[10px] text-white/40 mt-2 px-1">
           Keys are saved to .env in the app directory
         </p>
+      </section>
+
+      {/* voice settings */}
+      <section>
+        <div className="flex items-center gap-2 mb-2">
+          <Mic size={14} className="text-white/50" />
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-white/50">
+            Voice Settings
+          </h3>
+        </div>
+        <div className="rounded-xl bg-white/[0.03] border border-white/5 px-4 py-3 space-y-3">
+          {/* preset dropdown */}
+          <div className="flex items-center justify-between">
+            <span className="text-[13px] text-white/90">Voice</span>
+            <select
+              value={
+                VOICE_PRESETS.find(v => v.id === voiceSettings?.elevenlabsVoiceId)?.id ||
+                (voiceSettings?.elevenlabsVoiceId ? "custom" : DEFAULT_VOICE_ID)
+              }
+              onChange={async (e) => {
+                const value = e.target.value;
+                if (value === "custom") {
+                  setEditingVoiceId(true);
+                  setVoiceIdInput(voiceSettings?.elevenlabsVoiceId || "");
+                } else {
+                  await invoke("save_voice_settings", { voiceId: value });
+                  const voice = await invoke<VoiceSettings>("get_voice_settings");
+                  setVoiceSettings(voice);
+                }
+              }}
+              className="px-2 py-1.5 text-[12px] bg-white/5 border border-white/10 rounded-md text-white/90 focus:outline-none focus:border-white/30 cursor-pointer"
+            >
+              {VOICE_PRESETS.map((voice) => (
+                <option key={voice.id} value={voice.id} className="bg-zinc-900">
+                  {voice.name}
+                </option>
+              ))}
+              <option value="custom" className="bg-zinc-900">Custom ID...</option>
+            </select>
+          </div>
+
+          {/* custom voice id input */}
+          {editingVoiceId && (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={voiceIdInput}
+                onChange={(e) => setVoiceIdInput(e.target.value)}
+                placeholder="Enter voice ID..."
+                autoFocus
+                className="flex-1 px-2 py-1.5 text-[11px] bg-white/5 border border-white/10 rounded-md text-white/90 placeholder-white/30 focus:outline-none focus:border-white/30 font-mono"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveVoiceId();
+                  if (e.key === "Escape") {
+                    setEditingVoiceId(false);
+                    setVoiceIdInput("");
+                  }
+                }}
+              />
+              <button
+                onClick={handleSaveVoiceId}
+                disabled={!voiceIdInput.trim()}
+                className="px-2 py-1 text-[10px] rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 transition-colors disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setEditingVoiceId(false);
+                  setVoiceIdInput("");
+                }}
+                className="text-white/30 hover:text-white/60"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* browser profile */}

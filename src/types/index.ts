@@ -1,7 +1,9 @@
 export interface AgentUpdate {
-  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result" | "user_message" | "browser_result";
+  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result" | "user_message" | "browser_result" | "tool";
   message: string;
-  action?: ComputerAction;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  action?: ComputerAction; // deprecated, use tool_input
   screenshot?: string;
   bash_command?: string;
   exit_code?: number;
@@ -22,7 +24,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  type?: "thinking" | "action" | "error" | "info" | "bash";
+  type?: "thinking" | "action" | "error" | "info" | "bash" | "speak";
+  audioData?: string; // base64 audio for speak messages
   action?: ComputerAction;
   screenshot?: string;
   pending?: boolean;
@@ -77,6 +80,7 @@ export interface Conversation {
   turn_usage: unknown[];
   total_input_tokens: number;
   total_output_tokens: number;
+  voice_mode: boolean;
 }
 
 export interface AgentState {
@@ -86,6 +90,7 @@ export interface AgentState {
   inputText: string;
   selectedModel: ModelId;
   selectedMode: AgentMode;
+  voiceMode: boolean;
   streamingText: string;
   streamingThinking: string;
   conversationId: string | null;
@@ -98,6 +103,7 @@ export interface AgentState {
   setInputText: (text: string) => void;
   setSelectedModel: (model: ModelId) => void;
   setSelectedMode: (mode: AgentMode) => void;
+  setVoiceMode: (voiceMode: boolean) => void;
   clearMessages: () => void;
   setMessages: (messages: ChatMessage[]) => void;
   appendStreamingText: (text: string) => void;

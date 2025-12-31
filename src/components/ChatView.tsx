@@ -38,10 +38,15 @@ import {
   Mic,
   MicOff,
   Settings,
+  Volume2,
+  Play,
+  Pause,
 } from "lucide-react";
 import SettingsContent from "./SettingsContent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { createAudioElement } from "../utils/audio";
+import { formatToolMessage, ToolInput, stripVoiceInputTags } from "../utils/toolFormat";
 
 // url pill component showing domain and path
 function UrlLink({ url }: { url: string }) {
@@ -64,138 +69,6 @@ function UrlLink({ url }: { url: string }) {
     </span>
   );
 }
-
-// format action for display (past tense for loaded history)
-// stores url in format "action||url" when url is present for later rendering
-function formatActionForHistory(name: string, input: Record<string, unknown>): string {
-  // computer tool actions
-  if (name === "computer") {
-    const action = input.action as string;
-    const coord = input.coordinate as [number, number] | undefined;
-    const text = input.text as string | undefined;
-
-    switch (action) {
-      case "screenshot":
-        return "Took screenshot";
-      case "mouse_move":
-        return coord ? `Moved mouse to (${coord[0]}, ${coord[1]})` : "Moved mouse";
-      case "left_click":
-        return coord ? `Clicked at (${coord[0]}, ${coord[1]})` : "Left clicked";
-      case "right_click":
-        return "Right clicked";
-      case "double_click":
-        return coord ? `Double clicked at (${coord[0]}, ${coord[1]})` : "Double clicked";
-      case "type":
-        if (text) {
-          const preview = text.length > 30 ? `${text.slice(0, 30)}...` : text;
-          return `Typed: "${preview}"`;
-        }
-        return "Typed text";
-      case "key":
-        return text ? `Pressed key: ${text}` : "Pressed key";
-      case "scroll": {
-        const dir = input.scroll_direction as string || "down";
-        return `Scrolled ${dir}`;
-      }
-      case "wait":
-        return "Waited";
-      default:
-        return action;
-    }
-  }
-
-  // browser tool actions
-  switch (name) {
-    case "take_snapshot":
-      return "Took snapshot";
-    case "click": {
-      const dbl = input.dblClick as boolean;
-      return dbl ? "Double clicked" : "Clicked";
-    }
-    case "hover":
-      return "Hovered";
-    case "fill": {
-      const val = input.value as string | undefined;
-      if (val) {
-        const preview = val.length > 20 ? `${val.slice(0, 20)}...` : val;
-        return `Filled: "${preview}"`;
-      }
-      return "Filled field";
-    }
-    case "press_key": {
-      const key = input.key as string | undefined;
-      return key ? `Pressed ${key}` : "Pressed key";
-    }
-    case "navigate_page": {
-      const type = input.type as string | undefined;
-      switch (type) {
-        case "goto": {
-          const url = input.url as string | undefined;
-          if (url) {
-            return `Navigated to ||${url}||`;
-          }
-          return "Navigated";
-        }
-        case "back":
-          return "Went back";
-        case "forward":
-          return "Went forward";
-        case "reload":
-          return "Reloaded page";
-        default:
-          return "Navigated";
-      }
-    }
-    case "wait_for": {
-      const text = input.text as string | undefined;
-      if (text) {
-        const preview = text.length > 20 ? `${text.slice(0, 20)}...` : text;
-        return `Waited for "${preview}"`;
-      }
-      return "Waited";
-    }
-    case "new_page": {
-      const url = input.url as string | undefined;
-      if (url) {
-        return `Opened new tab ||${url}||`;
-      }
-      return "Opened new tab";
-    }
-    case "list_pages":
-      return "Listed tabs";
-    case "select_page": {
-      const idx = input.pageIdx as number | undefined;
-      return idx !== undefined ? `Switched to tab ${idx}` : "Switched tab";
-    }
-    case "close_page": {
-      const idx = input.pageIdx as number | undefined;
-      return idx !== undefined ? `Closed tab ${idx}` : "Closed tab";
-    }
-    case "drag":
-      return "Dragged";
-    case "fill_form":
-      return "Filled form";
-    case "handle_dialog": {
-      const action = input.action as string | undefined;
-      switch (action) {
-        case "accept":
-          return "Accepted dialog";
-        case "dismiss":
-          return "Dismissed dialog";
-        default:
-          return "Handled dialog";
-      }
-    }
-    case "screenshot":
-      return "Took screenshot";
-    case "upload_file":
-      return "Uploaded file";
-    default:
-      // fallback: convert snake_case to readable
-      return name.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-  }
-}
-
 interface ChatViewProps {
   variant: "sidebar" | "spotlight" | "mini";
 }
@@ -316,6 +189,60 @@ function ScreenshotBlock({ msg }: { msg: ChatMessage }) {
   );
 }
 
+function SpeakBubble({ msg }: { msg: ChatMessage }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const togglePlay = () => {
+    if (!msg.audioData) return;
+
+    if (!audioRef.current) {
+      audioRef.current = createAudioElement(msg.audioData);
+      audioRef.current.onended = () => setIsPlaying(false);
+    }
+
+    const audio = audioRef.current;
+    if (isPlaying) {
+      audio.pause();
+      audio.currentTime = 0;
+      setIsPlaying(false);
+    } else {
+      audio.play();
+      setIsPlaying(true);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex justify-start"
+    >
+      <div className="flex items-start gap-2 max-w-full">
+        <motion.button
+          onClick={togglePlay}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
+          className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+            isPlaying
+              ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
+              : "bg-white/10 border border-white/20 text-white/60 hover:text-white/80"
+          }`}
+        >
+          {isPlaying ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+        </motion.button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <Volume2 size={12} className="text-orange-300" />
+            <span className="text-[10px] text-white/40">Voice response</span>
+          </div>
+          <p className="text-[13px] text-white/80 leading-relaxed">{msg.content}</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // render content with embedded URLs as clickable links
 function renderContentWithUrls(content: string): React.ReactNode {
   const urlPattern = /\|\|(.+?)\|\|/g;
@@ -427,6 +354,10 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   if (msg.type === "action" && msg.action?.action === "screenshot") {
     return <ScreenshotBlock msg={msg} />;
+  }
+
+  if (msg.type === "speak") {
+    return <SpeakBubble msg={msg} />;
   }
 
   const getIcon = () => {
@@ -593,7 +524,7 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
       chatMessages.push({
         id: crypto.randomUUID(),
         role: "user",
-        content: mainText,
+        content: stripVoiceInputTags(mainText),
         timestamp: new Date(conversation.updated_at * 1000),
         screenshot,
       });
@@ -616,45 +547,22 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
             timestamp: new Date(conversation.updated_at * 1000),
           });
         } else if (block.type === "tool_use" && block.name) {
-          const input = block.input as Record<string, unknown> | undefined;
+          const input = (block.input as ToolInput) || {};
           const toolUseId = block.id;
+          const idx = chatMessages.length;
 
-          if (block.name === "bash" && input?.command) {
-            const idx = chatMessages.length;
-            chatMessages.push({
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: String(input.command),
-              timestamp: new Date(conversation.updated_at * 1000),
-              type: "bash",
-              pending: false,
-            });
-            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
-          } else if (block.name === "computer" && input?.action) {
-            const idx = chatMessages.length;
-            chatMessages.push({
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: formatActionForHistory("computer", input),
-              timestamp: new Date(conversation.updated_at * 1000),
-              type: "action",
-              action: input as unknown as ChatMessage["action"],
-              pending: false,
-            });
-            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
-          } else {
-            // browser tools - show as action
-            const idx = chatMessages.length;
-            chatMessages.push({
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: formatActionForHistory(block.name, input || {}),
-              timestamp: new Date(conversation.updated_at * 1000),
-              type: "action",
-              pending: false,
-            });
-            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
-          }
+          // centralized tool formatting (pending: false = past tense for history)
+          const formatted = formatToolMessage(block.name, input, { pending: false });
+          chatMessages.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: formatted.content,
+            timestamp: new Date(conversation.updated_at * 1000),
+            type: formatted.type,
+            action: formatted.action,
+            pending: false,
+          });
+          if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
         }
       }
     }
@@ -665,7 +573,7 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
 
 interface HistoryDropdownProps {
   onNewChat: () => void;
-  onLoad: (messages: ChatMessage[], model: ModelId, mode: AgentMode) => void;
+  onLoad: (messages: ChatMessage[], model: ModelId, mode: AgentMode, conversationId: string, voiceMode: boolean) => void;
   disabled?: boolean;
 }
 
@@ -708,7 +616,7 @@ function HistoryDropdown({ onNewChat, onLoad, disabled }: HistoryDropdownProps) 
         const chatMessages = convertApiToChat(conv);
         const model = conv.model as ModelId;
         const mode = conv.mode as AgentMode;
-        onLoad(chatMessages, model, mode);
+        onLoad(chatMessages, model, mode, conv.id, conv.voice_mode ?? false);
       }
     } catch (e) {
       console.error("Failed to load conversation:", e);
@@ -871,7 +779,7 @@ function StreamingBubble() {
 }
 
 export default function ChatView({ variant }: ChatViewProps) {
-  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages, setVoiceMode, setConversationId } = useAgentStore();
   const { submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -880,6 +788,8 @@ export default function ChatView({ variant }: ChatViewProps) {
   // voice state
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState("");
+  const [usedVoiceInput, setUsedVoiceInput] = useState(false);
+  const [showVoiceConfirm, setShowVoiceConfirm] = useState(false);
 
   // settings panel state
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -901,8 +811,10 @@ export default function ChatView({ variant }: ChatViewProps) {
       const { text, is_final } = event.payload;
       if (is_final) {
         const current = inputTextRef.current;
-        setInputText(current ? current + " " + text : text);
+        const newText = current ? current + " " + text : text;
+        setInputText(newText);
         setVoiceText("");
+        setUsedVoiceInput(true);
       } else {
         setVoiceText(text);
       }
@@ -911,6 +823,10 @@ export default function ChatView({ variant }: ChatViewProps) {
     const unlistenStopped = listen("voice:stopped", () => {
       setIsVoiceActive(false);
       setVoiceText("");
+      // show confirmation when recording stops (if there's text)
+      if (inputTextRef.current.trim()) {
+        setShowVoiceConfirm(true);
+      }
     });
 
     const unlistenError = listen<string>("voice:error", (event) => {
@@ -984,12 +900,20 @@ export default function ChatView({ variant }: ChatViewProps) {
     });
   }, [voiceText, inputText]);
 
+  const handleSubmit = () => {
+    if (!inputText.trim()) return;
+    // enable TTS response if voice input was used
+    if (usedVoiceInput) {
+      setVoiceMode(true);
+      setUsedVoiceInput(false);
+    }
+    submit();
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (inputText.trim()) {
-        submit();
-      }
+      handleSubmit();
     }
     if (e.key === "Escape" && isSpotlight) {
       invoke("hide_spotlight_window").catch(() => {});
@@ -1049,10 +973,12 @@ export default function ChatView({ variant }: ChatViewProps) {
             <>
               <HistoryDropdown
                 onNewChat={() => clearMessages()}
-                onLoad={(msgs, model, mode) => {
+                onLoad={(msgs, model, mode, conversationId, voiceMode) => {
                   setMessages(msgs);
                   setSelectedModel(model);
                   setSelectedMode(mode);
+                  setConversationId(conversationId);
+                  setVoiceMode(voiceMode);
                 }}
                 disabled={isRunning}
               />
@@ -1133,12 +1059,52 @@ export default function ChatView({ variant }: ChatViewProps) {
 
           {/* input or stop hint */}
           <div className={`${inputPadding} shrink-0`}>
+            {/* voice confirmation bar */}
+            <AnimatePresence>
+              {showVoiceConfirm && !isRunning && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="glass-card mb-2 p-2"
+                >
+                  <div className="flex items-start gap-2 mb-2">
+                    <Mic size={14} className="text-orange-300 shrink-0 mt-0.5" />
+                    <p className="text-[12px] text-white/80 leading-relaxed break-words whitespace-pre-wrap">{inputText}</p>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <motion.button
+                      onClick={() => setShowVoiceConfirm(false)}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="px-3 py-1 rounded-lg bg-white/10 border border-white/10 text-[11px] text-white/70 hover:text-white/90 hover:bg-white/15 transition-colors"
+                    >
+                      Edit
+                    </motion.button>
+                    <motion.button
+                      onClick={() => {
+                        setShowVoiceConfirm(false);
+                        setVoiceMode(true);
+                        setUsedVoiceInput(false);
+                        submit();
+                      }}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="px-3 py-1 rounded-lg bg-orange-500/30 border border-orange-400/30 text-[11px] text-orange-300 hover:bg-orange-500/40 transition-colors"
+                    >
+                      Send
+                    </motion.button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {isRunning ? (
               <div className="glass-card flex items-center justify-center gap-2 p-3 text-red-300/70">
                 <Square size={14} />
                 <span className="text-[12px]">⌘⇧S to stop</span>
               </div>
-            ) : (
+            ) : showVoiceConfirm ? null : (
               <div className="glass-card flex items-center gap-2 p-2">
                 <motion.button
                   onClick={toggleVoice}
@@ -1183,7 +1149,7 @@ export default function ChatView({ variant }: ChatViewProps) {
                   <span className="text-[9px]">Computer</span>
                 </motion.button>
                 <motion.button
-                  onClick={() => submit()}
+                  onClick={handleSubmit}
                   disabled={!inputText.trim()}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}

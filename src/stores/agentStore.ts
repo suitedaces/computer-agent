@@ -56,6 +56,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   inputText: "",
   selectedModel: "claude-haiku-4-5-20251001" as ModelId,
   selectedMode: "browser" as AgentMode,
+  voiceMode: false,
   streamingText: "",
   streamingThinking: "",
   conversationId: null,
@@ -63,17 +64,52 @@ export const useAgentStore = create<AgentState>((set) => ({
   setIsRunning: (running) => set({ isRunning: running }),
 
   addMessage: (msg) =>
-    set((state) => ({
-      messages: [
-        ...state.messages,
-        {
-          ...msg,
-          id: crypto.randomUUID(),
-          timestamp: new Date(),
-          pending: (msg.type === "action" || msg.type === "bash") ? true : undefined,
-        },
-      ],
-    })),
+    set((state) => {
+      const now = Date.now();
+      const last = state.messages[state.messages.length - 1];
+      const msgType = msg.type;
+      const isAssistant = msg.role === "assistant";
+      const isDedupeType = msgType === "info" || msgType === "speak";
+
+      if (isAssistant && isDedupeType && last && last.role === "assistant") {
+        const lastType = last.type;
+        const lastContent = last.content.trim();
+        const nextContent = msg.content.trim();
+        const lastTime = last.timestamp instanceof Date ? last.timestamp.getTime() : new Date(last.timestamp).getTime();
+        const recent = now - lastTime < 10000;
+
+        if (recent && lastContent === nextContent && (lastType === "info" || lastType === "speak")) {
+          // drop duplicate text after a recent speak, or repeated info/speak messages
+          if (lastType === msgType || (lastType === "speak" && msgType === "info")) {
+            return state;
+          }
+
+          // if speak arrives after identical text, upgrade the last message to speak
+          if (lastType === "info" && msgType === "speak") {
+            const messages = [...state.messages];
+            messages[messages.length - 1] = {
+              ...last,
+              ...msg,
+              id: last.id,
+              timestamp: last.timestamp,
+            };
+            return { messages };
+          }
+        }
+      }
+
+      return {
+        messages: [
+          ...state.messages,
+          {
+            ...msg,
+            id: crypto.randomUUID(),
+            timestamp: new Date(),
+            pending: (msg.type === "action" || msg.type === "bash") ? true : undefined,
+          },
+        ],
+      };
+    }),
 
   markLastActionComplete: (screenshot?: string) =>
     set((state) => {
@@ -108,7 +144,9 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   setSelectedMode: (selectedMode) => set({ selectedMode }),
 
-  clearMessages: () => set({ messages: [], conversationId: null, streamingText: "", streamingThinking: "" }),
+  setVoiceMode: (voiceMode) => set({ voiceMode }),
+
+  clearMessages: () => set({ messages: [], conversationId: null, streamingText: "", streamingThinking: "", voiceMode: false }),
 
   setMessages: (messages) => set({ messages }),
 

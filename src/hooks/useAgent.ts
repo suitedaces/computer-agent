@@ -3,6 +3,153 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
+import { queueAudio } from "../utils/audio";
+import { formatToolMessage, ToolInput } from "../utils/toolFormat";
+
+type UnlistenFn = () => void;
+
+const shouldAutoplayAudio = (() => {
+  if (typeof window === "undefined") return true;
+  const params = new URLSearchParams(window.location.search);
+  // only the main window should auto-play to avoid duplicate audio across windows
+  return !params.has("mini") && !params.has("spotlight") && !params.has("border");
+})();
+
+let listenersAttached = false;
+let listenersRefCount = 0;
+let unlistenPromises: Array<Promise<UnlistenFn>> = [];
+
+function attachListeners() {
+  if (listenersAttached) return;
+  listenersAttached = true;
+
+  const store = useAgentStore.getState;
+
+  invoke<boolean>("check_api_key")
+    .then((v) => store().setApiKeySet(v))
+    .catch(() => store().setApiKeySet(false));
+
+  const unlistenPromise = listen<AgentUpdate>("agent-update", (event) => {
+    const { update_type, message, tool_name, tool_input, screenshot, exit_code, mode } = event.payload;
+    const s = store();
+
+    switch (update_type) {
+      case "started":
+        s.setIsRunning(true);
+        if (mode === "computer") {
+          invoke("set_main_click_through", { ignore: true }).catch(() => {});
+          invoke("set_mini_click_through", { ignore: true }).catch(() => {});
+          invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
+          invoke("show_border_overlay").catch(() => {});
+        }
+        break;
+
+      case "user_message":
+        s.addMessage({ role: "user", content: message, screenshot });
+        break;
+
+      case "thinking":
+        s.clearStreamingThinking();
+        s.addMessage({ role: "assistant", content: message, type: "thinking" });
+        break;
+
+      case "response":
+        s.clearStreamingText();
+        s.addMessage({ role: "assistant", content: message, type: "info" });
+        break;
+
+      case "tool":
+        // centralized tool formatting
+        if (tool_name && tool_input) {
+          const formatted = formatToolMessage(tool_name, tool_input as ToolInput, { pending: true });
+          s.addMessage({
+            role: "assistant",
+            content: formatted.content,
+            type: formatted.type,
+            action: formatted.action,
+            pending: true,
+          });
+        }
+        break;
+
+      case "screenshot":
+        s.markLastActionComplete(screenshot);
+        break;
+
+      case "finished":
+        s.setIsRunning(false);
+        invoke("set_main_click_through", { ignore: false }).catch(() => {});
+        invoke("set_mini_click_through", { ignore: false }).catch(() => {});
+        invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
+        invoke("hide_border_overlay").catch(() => {});
+        break;
+
+      case "error":
+        s.setIsRunning(false);
+        invoke("set_main_click_through", { ignore: false }).catch(() => {});
+        invoke("set_mini_click_through", { ignore: false }).catch(() => {});
+        invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
+        invoke("hide_border_overlay").catch(() => {});
+        s.addMessage({ role: "assistant", content: message, type: "error" });
+        break;
+
+      case "bash_result":
+        s.updateLastBashWithResult(message, exit_code);
+        break;
+
+      case "browser_result":
+        s.markLastActionComplete();
+        break;
+    }
+  });
+
+  const unlistenStreamPromise = listen<{ type: string; text?: string }>("agent-stream", (event) => {
+    const { type, text } = event.payload;
+    const s = store();
+    if (type === "thinking_delta" && text) {
+      s.appendStreamingThinking(text);
+    } else if (type === "text_delta" && text) {
+      s.appendStreamingText(text);
+    }
+  });
+
+  const unlistenConvIdPromise = listen<string>("agent:conversation_id", (event) => {
+    store().setConversationId(event.payload);
+  });
+
+  const unlistenSpeakPromise = listen<{ audio: string; text: string }>("agent:speak", (event) => {
+    const { audio, text } = event.payload;
+    console.log("[voice] Speaking:", text.slice(0, 50) + "...");
+    store().addMessage({ role: "assistant", content: text, type: "speak", audioData: audio });
+    if (shouldAutoplayAudio) {
+      queueAudio(audio);
+    }
+  });
+
+  const unlistenVoiceModePromise = listen<boolean>("agent:voice_mode", (event) => {
+    console.log("[voice] Voice mode restored:", event.payload);
+    store().setVoiceMode(event.payload);
+  });
+
+  unlistenPromises = [
+    unlistenPromise,
+    unlistenStreamPromise,
+    unlistenConvIdPromise,
+    unlistenSpeakPromise,
+    unlistenVoiceModePromise,
+  ];
+}
+
+function detachListeners() {
+  if (!listenersAttached) return;
+  listenersAttached = false;
+
+  const toRemove = unlistenPromises;
+  unlistenPromises = [];
+  toRemove.forEach((promise) => {
+    promise.then((fn) => fn());
+  });
+}
 
 export function useAgent() {
   const {
@@ -14,143 +161,36 @@ export function useAgent() {
     conversationId,
     setIsRunning,
     addMessage,
-    markLastActionComplete,
-    updateLastBashWithResult,
-    setApiKeySet,
     setInputText,
-    appendStreamingText,
-    clearStreamingText,
-    appendStreamingThinking,
-    clearStreamingThinking,
-    setConversationId,
   } = useAgentStore();
 
-  // setup event listener
+  // setup event listeners once on mount
+  // use getState() inside handlers to avoid stale closures and dep array issues
   useEffect(() => {
-    invoke<boolean>("check_api_key")
-      .then(setApiKeySet)
-      .catch(() => setApiKeySet(false));
-
-    invoke("debug_log", { message: "Setting up event listener..." });
-
-    const unlistenPromise = listen<AgentUpdate>("agent-update", (event) => {
-      invoke("debug_log", { message: `Event received: ${event.payload.update_type}` });
-      const { update_type, message, action, screenshot, exit_code, mode } = event.payload;
-
-      switch (update_type) {
-        case "started":
-          setIsRunning(true);
-          // make all windows click-through while agent runs
-          invoke("set_main_click_through", { ignore: true }).catch(() => {});
-          invoke("set_mini_click_through", { ignore: true }).catch(() => {});
-          invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
-          // only show border overlay in computer mode
-          if (mode === "computer") {
-            invoke("show_border_overlay").catch(() => {});
-          }
-          break;
-
-        case "user_message":
-          addMessage({ role: "user", content: message, screenshot });
-          break;
-
-        case "thinking":
-          clearStreamingThinking();
-          addMessage({ role: "assistant", content: message, type: "thinking" });
-          break;
-
-        case "response":
-          clearStreamingText();
-          addMessage({ role: "assistant", content: message, type: "info" });
-          break;
-
-        case "action":
-          // bash commands get their own type
-          if (message.startsWith("$ ")) {
-            addMessage({
-              role: "assistant",
-              content: message.slice(2), // remove "$ " prefix, store just the command
-              type: "bash",
-            });
-          } else {
-            addMessage({
-              role: "assistant",
-              content: message,
-              type: "action",
-              action: action,
-            });
-          }
-          break;
-
-        case "screenshot":
-          markLastActionComplete(screenshot);
-          break;
-
-        case "finished":
-          setIsRunning(false);
-          // disable click-through when done
-          invoke("set_main_click_through", { ignore: false }).catch(() => {});
-          invoke("set_mini_click_through", { ignore: false }).catch(() => {});
-          invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
-          invoke("hide_border_overlay").catch(() => {});
-          break;
-
-        case "error":
-          setIsRunning(false);
-          // disable click-through on error
-          invoke("set_main_click_through", { ignore: false }).catch(() => {});
-          invoke("set_mini_click_through", { ignore: false }).catch(() => {});
-          invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
-          invoke("hide_border_overlay").catch(() => {});
-          addMessage({ role: "assistant", content: message, type: "error" });
-          break;
-
-        case "bash_result":
-          updateLastBashWithResult(message, exit_code);
-          break;
-
-        case "browser_result":
-          // mark the last action as complete when browser tool finishes
-          markLastActionComplete();
-          break;
-      }
-    });
-
-    unlistenPromise.then(() => {
-      invoke("debug_log", { message: "Event listener ready" });
-    }).catch((err) => {
-      invoke("debug_log", { message: `Event listener FAILED: ${err}` });
-    });
-
-    // streaming event listener
-    const unlistenStreamPromise = listen<{ type: string; text?: string; name?: string }>("agent-stream", (event) => {
-      const { type, text } = event.payload;
-      if (type === "thinking_delta" && text) {
-        appendStreamingThinking(text);
-      } else if (type === "text_delta" && text) {
-        appendStreamingText(text);
-      }
-    });
-
-    // conversation id listener
-    const unlistenConvIdPromise = listen<string>("agent:conversation_id", (event) => {
-      setConversationId(event.payload);
-    });
+    listenersRefCount += 1;
+    attachListeners();
 
     return () => {
-      unlistenPromise.then((fn) => fn());
-      unlistenStreamPromise.then((fn) => fn());
-      unlistenConvIdPromise.then((fn) => fn());
+      listenersRefCount -= 1;
+      if (listenersRefCount <= 0) {
+        listenersRefCount = 0;
+        detachListeners();
+      }
     };
-  }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking, setConversationId]);
+  }, []);
 
   const submit = useCallback(async (overrideText?: string, contextScreenshot?: string, overrideMode?: string) => {
     const text = (overrideText ?? inputText).trim();
-    if (!text || isRunning) return;
+    // use fresh isRunning to avoid stale closure
+    const currentIsRunning = useAgentStore.getState().isRunning;
+    if (!text || currentIsRunning) {
+      console.log("[useAgent] submit blocked: text=", !!text, "isRunning=", currentIsRunning);
+      return;
+    }
 
     // build history from past messages (user + assistant responses)
     const history = messages
-      .filter(m => m.role === "user" || (m.role === "assistant" && (m.type === "thinking" || m.type === "info")))
+      .filter(m => m.role === "user" || (m.role === "assistant" && (m.type === "thinking" || m.type === "info" || m.type === "speak")))
       .map(m => ({ role: m.role, content: m.content }));
 
     // clear input before invoking (user message comes from backend via user_message event)
@@ -159,15 +199,19 @@ export function useAgent() {
     // use override mode if provided, otherwise use selected mode
     const mode = overrideMode ?? selectedMode;
 
+    // read fresh voiceMode from store to avoid stale closure
+    const currentVoiceMode = useAgentStore.getState().voiceMode;
+
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
+      console.log("[useAgent] invoking run_agent:", { text: text.slice(0, 50), model: selectedModel, mode, voiceMode: currentVoiceMode, conversationId });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode, voiceMode: currentVoiceMode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
     } catch (error) {
       // on early failure, show the user message so they know what failed
       addMessage({ role: "user", content: text });
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, selectedModel, selectedMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
+  }, [inputText, selectedModel, selectedMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {

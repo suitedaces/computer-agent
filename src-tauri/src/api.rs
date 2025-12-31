@@ -143,7 +143,7 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self, mode: AgentMode) -> Vec<serde_json::Value> {
+    fn build_tools(&self, mode: AgentMode, voice_mode: bool) -> Vec<serde_json::Value> {
         let mut tools = Vec::new();
 
         match mode {
@@ -169,6 +169,24 @@ impl AnthropicClient {
             "name": "bash"
         }));
 
+        // speak tool for voice mode
+        if voice_mode {
+            tools.push(serde_json::json!({
+                "name": "speak",
+                "description": "Speak to the user via text-to-speech. This is your only communication channel - the user cannot see any text you write. Use speak() for responses, confirmations, questions, and updates. Keep it conversational and concise (1-3 sentences).",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
+                        }
+                    },
+                    "required": ["text"]
+                }
+            }));
+        }
+
         tools
     }
 
@@ -177,13 +195,19 @@ impl AnthropicClient {
         messages: Vec<Message>,
         event_tx: mpsc::UnboundedSender<StreamEvent>,
         mode: AgentMode,
+        voice_mode: bool,
     ) -> Result<ApiResult, ApiError> {
-        let system = match mode {
+        let mut system = match mode {
             AgentMode::Computer => SYSTEM_PROMPT.to_string(),
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
         };
 
-        let tools = self.build_tools(mode);
+        // only append voice instructions when voice mode is enabled (speak tool available)
+        if voice_mode {
+            system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
+        }
+
+        let tools = self.build_tools(mode, voice_mode);
         println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
         println!("[api] Tools JSON: {}", serde_json::to_string_pretty(&tools).unwrap_or_default());
 
@@ -520,7 +544,7 @@ const BROWSER_SYSTEM_PROMPT: &str = r#"You are taskhomie in browser mode. You co
 
 Keep text responses very concise. Focus on doing, not explaining. Use tools on every turn.
 
-Start every task with take_snapshot to see the page. Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
+Use uids from the latest snapshot only—stale uids fail. Take a new snapshot after any action that changes the page.
 
 Use screenshot when:
 - You're stuck or something isn't working as expected
@@ -533,6 +557,28 @@ Use bash for file operations.
 If browser tools fail with connection errors, Chrome may have been closed. Run this bash command to relaunch it with debugging enabled:
 open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.taskhomie-chrome" --profile-directory=Default --no-first-run
 Then wait a few seconds and retry the browser tool."#;
+
+const VOICE_SYSTEM_PROMPT_APPEND: &str = r#"
+
+<voice_mode_instructions>
+When you see user messages wrapped in <voice_input> tags, the user spoke to you and can only hear your response via the speak tool. They cannot see any text you output.
+
+CRITICAL: You MUST call speak() frequently - at least every 2-3 tool calls. NEVER leave the user hanging in silence. Call speak() at the start to tell the user what you're doing, give progress updates every few actions, and call it at the end with your conclusion. Without speak(), the user hears nothing and thinks you are stuck or broken.
+
+Output behavior:
+- Keep text blocks EXTREMELY short - just a few words for your own notes. The user never sees them.
+- speak() is the only way the user hears from you. Without it, you are silent.
+- Call speak() for all responses, confirmations, questions, errors, and status updates.
+
+Speech style:
+- Conversational and concise (1-3 sentences per call)
+- Natural spoken language - say "two hundred" not "200", spell out abbreviations
+- No markdown, code blocks, URLs, or formatting - just words
+
+Continue working after speaking - don't wait for acknowledgment. The user will interrupt if needed.
+
+START BY CALLING speak() NOW to tell the user what you're about to do. THEN CALL speak() EVERY 2-3 TOOL CALLS TO KEEP THEM UPDATED.
+</voice_mode_instructions>"#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![

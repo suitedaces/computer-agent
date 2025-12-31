@@ -3,13 +3,16 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, Send, X } from "lucide-react";
+import { ChevronRight, Send, X, Volume2, Maximize2 } from "lucide-react";
 import ChatView from "./components/ChatView";
+import MessagesDisplay from "./components/MessagesDisplay";
 import { useAgent } from "./hooks/useAgent";
+import { useAgentStore } from "./stores/agentStore";
 import VoiceOrb from "./components/VoiceOrb";
 
 export default function MiniWindow() {
   const { submit } = useAgent();
+  const setVoiceMode = useAgentStore((s) => s.setVoiceMode);
   const [isRunning, setIsRunning] = useState(false);
   const [helpMode, setHelpMode] = useState(false);
   const [helpPrompt, setHelpPrompt] = useState("");
@@ -20,11 +23,24 @@ export default function MiniWindow() {
   const [pttRecording, setPttRecording] = useState(false);
   const [pttInterim, setPttInterim] = useState("");
   const [pttRetryMode, setPttRetryMode] = useState(false);
+  const submitRef = useRef(submit);
+  const lastPttResultRef = useRef<{ text: string; at: number } | null>(null);
+  const pttSessionIdRef = useRef(0);
+  const pttHandledSessionRef = useRef<number | null>(null);
+  const pttPhaseRef = useRef<"idle" | "recording" | "stoppedWaiting">("idle");
+  const pttStoppedAtRef = useRef(0);
+
+  // voice response mode - shows ChatView in mini window
+  const [voiceResponseMode, setVoiceResponseMode] = useState(false);
+
+  useEffect(() => {
+    submitRef.current = submit;
+  }, [submit]);
 
   // poll running state and resize window
   useEffect(() => {
     // don't poll/resize while in special modes - backend handles sizing
-    if (helpMode || pttRecording || pttRetryMode) return;
+    if (helpMode || pttRecording || pttRetryMode || voiceResponseMode) return;
 
     const checkRunning = () => {
       invoke<boolean>("is_agent_running").then((running) => {
@@ -42,7 +58,7 @@ export default function MiniWindow() {
     checkRunning();
     const interval = setInterval(checkRunning, 500);
     return () => clearInterval(interval);
-  }, [helpMode, pttRecording, pttRetryMode]);
+  }, [helpMode, pttRecording, pttRetryMode, voiceResponseMode]);
 
   useEffect(() => {
     const unlisten1 = listen("agent:started", () => {
@@ -51,6 +67,8 @@ export default function MiniWindow() {
 
     const unlisten2 = listen("agent:stopped", () => {
       setIsRunning(false);
+      // keep voice response visible for a moment after agent stops
+      // user can dismiss or expand to main
     });
 
     // hotkey help mode - Cmd+Shift+H triggers this
@@ -64,12 +82,21 @@ export default function MiniWindow() {
     });
 
     // PTT recording state
-    const unlisten4 = listen<{ recording: boolean }>("ptt:recording", (e) => {
-      console.log("[ptt] recording:", e.payload.recording);
+    const unlisten4 = listen<{ recording: boolean; sessionId?: number }>("ptt:recording", (e) => {
+      console.log("[ptt] recording:", e.payload.recording, "session:", e.payload.sessionId);
       setPttRecording(e.payload.recording);
       if (e.payload.recording) {
         setPttInterim("");
         setPttRetryMode(false);
+        // use backend session id for correlation
+        if (e.payload.sessionId !== undefined) {
+          pttSessionIdRef.current = e.payload.sessionId;
+        }
+        pttHandledSessionRef.current = null;
+        pttPhaseRef.current = "recording";
+      } else {
+        pttPhaseRef.current = "stoppedWaiting";
+        pttStoppedAtRef.current = Date.now();
       }
     });
 
@@ -80,12 +107,35 @@ export default function MiniWindow() {
     });
 
     // PTT result - auto-submit or show retry
-    const unlisten6 = listen<{ text: string; screenshot: string | null; mode: string | null }>("ptt:result", async (e) => {
+    const unlisten6 = listen<{ text: string; screenshot: string | null; mode: string | null; sessionId?: number }>("ptt:result", async (e) => {
       console.log("[ptt] result:", e.payload);
       setPttRecording(false);
       setPttInterim("");
 
-      const { text, screenshot, mode } = e.payload;
+      const { text, screenshot, mode, sessionId } = e.payload;
+      // use backend session id for correlation if available
+      const expectedSessionId = pttSessionIdRef.current;
+      if (sessionId !== undefined && sessionId !== expectedSessionId) {
+        console.log("[ptt] stale session result ignored: got", sessionId, "expected", expectedSessionId);
+        return;
+      }
+      if (pttHandledSessionRef.current === expectedSessionId) {
+        console.log("[ptt] duplicate session result ignored");
+        return;
+      }
+      const now = Date.now();
+      if (pttPhaseRef.current !== "stoppedWaiting" || now - pttStoppedAtRef.current > 3000) {
+        console.log("[ptt] stale result ignored (phase or timeout)");
+        return;
+      }
+      pttPhaseRef.current = "idle";
+      pttHandledSessionRef.current = expectedSessionId;
+      const last = lastPttResultRef.current;
+      if (last && last.text === text && now - last.at < 1500) {
+        console.log("[ptt] duplicate result ignored");
+        return;
+      }
+      lastPttResultRef.current = { text, at: now };
 
       if (!text.trim()) {
         // empty transcription - show retry mode
@@ -98,17 +148,27 @@ export default function MiniWindow() {
         return;
       }
 
-      // has transcription - auto-submit to spotlight
+      // has transcription - submit and show voice response in mini window
       try {
-        await invoke("show_spotlight_window");
-        await new Promise((r) => setTimeout(r, 150));
+        // enable voice mode for TTS response when using voice input
+        setVoiceMode(true);
+        // enter voice response mode - stay in mini window
+        setVoiceResponseMode(true);
+        // resize and reposition to top right
+        await invoke("position_mini_window", { width: 320, height: 280 });
         // pass mode override if not "current" (which means use UI selection)
         const modeOverride = mode && mode !== "current" ? mode : undefined;
-        await submit(text, screenshot ?? undefined, modeOverride);
-        await invoke("hide_mini_window");
+        console.log("[ptt] submitting:", text, "mode:", modeOverride);
+        await submitRef.current(text, screenshot ?? undefined, modeOverride);
       } catch (err) {
         console.error("[ptt] submit failed:", err);
       }
+    });
+
+    // listen for speak events - messages come through store via useAgent
+    const unlisten8 = listen<{ audio: string; text: string }>("agent:speak", (e) => {
+      console.log("[mini] speak:", e.payload.text.slice(0, 50) + "...");
+      // audio is played by main window via useAgent, messages go to store
     });
 
     // PTT error
@@ -116,6 +176,7 @@ export default function MiniWindow() {
       console.error("[ptt] error:", e.payload);
       setPttRecording(false);
       setPttInterim("");
+      pttPhaseRef.current = "idle";
     });
 
     return () => {
@@ -126,8 +187,9 @@ export default function MiniWindow() {
       unlisten5.then((f) => f());
       unlisten6.then((f) => f());
       unlisten7.then((f) => f());
+      unlisten8.then((f) => f());
     };
-  }, [submit]);
+  }, []);
 
   const handleOpenMain = async () => {
     try {
@@ -260,7 +322,7 @@ export default function MiniWindow() {
   // PTT recording - orb with streaming text, fully transparent
   if (pttRecording && !isRunning) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-transparent">
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -306,7 +368,7 @@ export default function MiniWindow() {
     };
 
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-transparent">
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -331,6 +393,54 @@ export default function MiniWindow() {
           </motion.div>
         </motion.div>
       </div>
+    );
+  }
+
+  // voice response mode - shows messages in mini window
+  if (voiceResponseMode) {
+    const handleExpandToMain = async () => {
+      setVoiceResponseMode(false);
+      await invoke("show_spotlight_window");
+      await invoke("show_mini_window");
+    };
+
+    const handleDismiss = async () => {
+      setVoiceResponseMode(false);
+      await invoke("show_mini_window");
+    };
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="h-screen w-screen flex flex-col bg-black/90 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden"
+      >
+        {/* mini header with actions */}
+        <div className="flex items-center justify-between px-2 py-1.5 border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-1.5">
+            <Volume2 size={12} className={`text-orange-300 ${isRunning ? "animate-pulse" : ""}`} />
+            <span className="text-[10px] text-white/40">voice</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleDismiss}
+              className="px-2 py-0.5 rounded text-[10px] text-white/40 hover:text-white/60 hover:bg-white/5 transition-colors"
+            >
+              Dismiss
+            </button>
+            <button
+              onClick={handleExpandToMain}
+              className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-white/60 hover:bg-white/15 hover:text-white/80 transition-colors flex items-center gap-1"
+            >
+              <Maximize2 size={10} />
+            </button>
+          </div>
+        </div>
+        {/* messages display */}
+        <div className="flex-1 min-h-0 overflow-hidden p-2">
+          <MessagesDisplay className="h-full" />
+        </div>
+      </motion.div>
     );
   }
 

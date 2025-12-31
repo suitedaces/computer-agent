@@ -70,6 +70,9 @@ pub struct Conversation {
     /// aggregated usage
     pub total_input_tokens: u32,
     pub total_output_tokens: u32,
+    /// voice mode enabled for TTS responses
+    #[serde(default)]
+    pub voice_mode: bool,
 }
 
 impl Conversation {
@@ -86,6 +89,7 @@ impl Conversation {
             turn_usage: Vec::new(),
             total_input_tokens: 0,
             total_output_tokens: 0,
+            voice_mode: false,
         }
     }
 
@@ -190,12 +194,17 @@ pub fn init_db() -> Result<(), String> {
             messages_json TEXT NOT NULL,
             turn_usage_json TEXT NOT NULL,
             total_input_tokens INTEGER NOT NULL DEFAULT 0,
-            total_output_tokens INTEGER NOT NULL DEFAULT 0
+            total_output_tokens INTEGER NOT NULL DEFAULT 0,
+            voice_mode INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
         ",
     )
     .map_err(|e| format!("failed to create tables: {e}"))?;
+
+    // migration: add voice_mode column if missing (for existing DBs)
+    conn.execute("ALTER TABLE conversations ADD COLUMN voice_mode INTEGER NOT NULL DEFAULT 0", [])
+        .ok();
 
     DB.set(Mutex::new(conn))
         .map_err(|_| "db already initialized")?;
@@ -237,8 +246,8 @@ pub fn save_conversation(conv: &Conversation) -> Result<(), String> {
     with_db(|conn| {
         conn.execute(
             "INSERT OR REPLACE INTO conversations
-             (id, title, created_at, updated_at, model, mode, messages_json, turn_usage_json, total_input_tokens, total_output_tokens)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             (id, title, created_at, updated_at, model, mode, messages_json, turn_usage_json, total_input_tokens, total_output_tokens, voice_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 conv.id,
                 conv.title,
@@ -250,6 +259,7 @@ pub fn save_conversation(conv: &Conversation) -> Result<(), String> {
                 turn_usage_json,
                 conv.total_input_tokens,
                 conv.total_output_tokens,
+                conv.voice_mode as i32,
             ],
         )?;
         Ok(())
@@ -263,13 +273,14 @@ pub fn save_conversation(conv: &Conversation) -> Result<(), String> {
 pub fn load_conversation(id: &str) -> Result<Option<Conversation>, String> {
     with_db(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, updated_at, model, mode, messages_json, turn_usage_json, total_input_tokens, total_output_tokens
+            "SELECT id, title, created_at, updated_at, model, mode, messages_json, turn_usage_json, total_input_tokens, total_output_tokens, voice_mode
              FROM conversations WHERE id = ?1",
         )?;
 
         let result = stmt.query_row(params![id], |row| {
             let messages_json: String = row.get(6)?;
             let turn_usage_json: String = row.get(7)?;
+            let voice_mode_int: i32 = row.get(10)?;
 
             Ok(Conversation {
                 id: row.get(0)?,
@@ -282,6 +293,7 @@ pub fn load_conversation(id: &str) -> Result<Option<Conversation>, String> {
                 turn_usage: serde_json::from_str(&turn_usage_json).unwrap_or_default(),
                 total_input_tokens: row.get(8)?,
                 total_output_tokens: row.get(9)?,
+                voice_mode: voice_mode_int != 0,
             })
         });
 
@@ -387,6 +399,19 @@ pub fn count_conversations() -> Result<u32, String> {
             Ok(count as u32)
         })
     })
+}
+
+/// update voice_mode for a conversation
+pub fn set_conversation_voice_mode(id: &str, voice_mode: bool) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE conversations SET voice_mode = ?1 WHERE id = ?2",
+            params![voice_mode as i32, id],
+        )?;
+        Ok(())
+    })?;
+    println!("[storage] set voice_mode={} for conversation {}", voice_mode, id);
+    Ok(())
 }
 
 #[cfg(test)]

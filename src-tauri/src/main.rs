@@ -123,14 +123,16 @@ async fn run_agent(
     instructions: String,
     model: String,
     mode: AgentMode,
+    voice_mode: Option<bool>,
     history: Vec<HistoryMessage>,
     context_screenshot: Option<String>,
     conversation_id: Option<String>,
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, history: {} msgs, screenshot: {}, conv: {:?})",
-        instructions, model, mode, history.len(), context_screenshot.is_some(), conversation_id);
+    let voice = voice_mode.unwrap_or(false);
+    println!("[taskhomie] run_agent called with: {} (model: {}, mode: {:?}, voice: {}, history: {} msgs, screenshot: {}, conv: {:?})",
+        instructions, model, mode, voice, history.len(), context_screenshot.is_some(), conversation_id);
 
     let agent = state.agent.clone();
 
@@ -146,7 +148,7 @@ async fn run_agent(
 
     tokio::spawn(async move {
         let agent_guard = agent.lock().await;
-        match agent_guard.run(instructions, model, mode, history, context_screenshot, conversation_id, app_handle).await {
+        match agent_guard.run(instructions, model, mode, voice, history, context_screenshot, conversation_id, app_handle).await {
             Ok(_) => println!("[taskhomie] Agent finished"),
             Err(e) => println!("[taskhomie] Agent error: {:?}", e),
         }
@@ -199,6 +201,24 @@ fn hide_mini_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     if let Some(window) = _app_handle.get_webview_window("mini") {
         let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn position_mini_window(app_handle: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.set_size(tauri::LogicalSize::new(width, height));
+        position_window_top_right(&window, width, height);
+        if let Some(panel) = MINI_PANEL.get() {
+            panel.show();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.set_size(tauri::LogicalSize::new(width, height));
+        let _ = window.show();
     }
     Ok(())
 }
@@ -447,6 +467,11 @@ mod storage_cmd {
     pub fn search_conversations(query: String, limit: usize) -> Result<Vec<ConversationMeta>, String> {
         storage::search_conversations(&query, limit)
     }
+
+    #[tauri::command(rename_all = "camelCase")]
+    pub fn set_conversation_voice_mode(conversation_id: String, voice_mode: bool) -> Result<(), String> {
+        storage::set_conversation_voice_mode(&conversation_id, voice_mode)
+    }
 }
 
 // --- voice IPC commands ---
@@ -464,6 +489,7 @@ mod voice_cmd {
         pub session: Arc<PushToTalkSession>,
         pub screenshot: std::sync::Mutex<Option<String>>,
         pub mode: std::sync::Mutex<Option<String>>,
+        pub current_session_id: std::sync::Mutex<u64>,
     }
 
     #[tauri::command]
@@ -515,7 +541,9 @@ mod voice_cmd {
         let api_key = std::env::var("DEEPGRAM_API_KEY")
             .map_err(|_| "DEEPGRAM_API_KEY not set in .env".to_string())?;
 
-        state.session.start(api_key, app_handle).await
+        let session_id = state.session.start(api_key, app_handle).await?;
+        *state.current_session_id.lock().unwrap() = session_id;
+        Ok(())
     }
 
     #[tauri::command]
@@ -523,7 +551,7 @@ mod voice_cmd {
         state: State<'_, PttState>,
     ) -> Result<(String, Option<String>), String> {
         println!("[ptt cmd] stop_ptt called");
-        let text = state.session.stop().await;
+        let (text, _session_id) = state.session.stop().await;
         let screenshot = state.screenshot.lock().unwrap().take();
         println!("[ptt cmd] got text: '{}', screenshot: {}", text, screenshot.is_some());
         Ok((text, screenshot))
@@ -565,17 +593,13 @@ fn main() {
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyQ))
                 .unwrap()
-                .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV))
-                .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyC))
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyB))
                 .unwrap()
                 .with_handler(move |app, shortcut, event| {
-                    // PTT shortcuts - V (current mode), Ctrl+Shift+C (computer), Ctrl+Shift+B (browser)
-                    let ptt_mode: Option<&str> = if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyV) {
-                        Some("current") // use whatever mode is selected in UI
-                    } else if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyC) {
+                    // PTT shortcuts - Ctrl+Shift+C (computer), Ctrl+Shift+B (browser)
+                    let ptt_mode: Option<&str> = if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyC) {
                         Some("computer")
                     } else if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyB) {
                         Some("browser")
@@ -588,9 +612,13 @@ fn main() {
                             ShortcutState::Pressed => {
                                 println!("[ptt] pressed - starting recording (mode: {})", mode);
 
-                                // capture screenshot first (excluding app windows)
-                                // use _sync version since shortcut handlers run on main thread
-                                let screenshot = panels::take_screenshot_excluding_app_sync().ok();
+                                // capture screenshot only for computer mode
+                                // browser mode uses a11y tree, screenshots are redundant
+                                let screenshot = if mode == "computer" {
+                                    panels::take_screenshot_excluding_app_sync().ok()
+                                } else {
+                                    None
+                                };
 
                                 // play recording start sound
                                 #[cfg(target_os = "macos")]
@@ -600,6 +628,12 @@ fn main() {
                                         .spawn()
                                         .ok();
                                 }
+
+                                // emit recording event BEFORE showing window so frontend renders PTT UI
+                                let _ = app.emit("ptt:recording", serde_json::json!({
+                                    "recording": true,
+                                    "sessionId": 0  // placeholder, real session id comes later
+                                }));
 
                                 // resize mini window for orb UI (200px orb + text below)
                                 #[cfg(target_os = "macos")]
@@ -615,9 +649,6 @@ fn main() {
                                     let _ = window.set_size(tauri::LogicalSize::new(300.0, 300.0));
                                     let _ = window.show();
                                 }
-
-                                // emit event to show recording indicator
-                                let _ = app.emit("ptt:recording", serde_json::json!({ "recording": true }));
 
                                 // start PTT recording via command
                                 let app_clone = app.clone();
@@ -639,9 +670,19 @@ fn main() {
                                         }
                                         *ptt_state.mode.lock().unwrap() = Some(mode_str);
 
-                                        if let Err(e) = ptt_state.session.start(api_key, app_clone.clone()).await {
-                                            println!("[ptt] start error: {}", e);
-                                            let _ = app_clone.emit("ptt:error", e);
+                                        match ptt_state.session.start(api_key, app_clone.clone()).await {
+                                            Ok(session_id) => {
+                                                *ptt_state.current_session_id.lock().unwrap() = session_id;
+                                                // emit recording event with session id
+                                                let _ = app_clone.emit("ptt:recording", serde_json::json!({
+                                                    "recording": true,
+                                                    "sessionId": session_id
+                                                }));
+                                            }
+                                            Err(e) => {
+                                                println!("[ptt] start error: {}", e);
+                                                let _ = app_clone.emit("ptt:error", e);
+                                            }
                                         }
                                     }
                                 });
@@ -662,9 +703,16 @@ fn main() {
                                 let app_clone = app.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
-                                        let raw_text = ptt_state.session.stop().await;
+                                        let expected_session_id = *ptt_state.current_session_id.lock().unwrap();
+                                        let (raw_text, result_session_id) = ptt_state.session.stop().await;
                                         let screenshot = ptt_state.screenshot.lock().unwrap().take();
                                         let mode = ptt_state.mode.lock().unwrap().take();
+
+                                        // check for stale result
+                                        if result_session_id != expected_session_id {
+                                            println!("[ptt] stale result ignored: got session {} but expected {}", result_session_id, expected_session_id);
+                                            return;
+                                        }
 
                                         // rewrite transcription to clean up speech artifacts
                                         let text = if !raw_text.trim().is_empty() {
@@ -691,16 +739,20 @@ fn main() {
                                             raw_text
                                         };
 
-                                        println!("[ptt] result: text='{}', screenshot={}, mode={:?}", text, screenshot.is_some(), mode);
+                                        println!("[ptt] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
 
                                         // emit recording=false right before result so UI doesn't flash to idle bar
-                                        let _ = app_clone.emit("ptt:recording", serde_json::json!({ "recording": false }));
+                                        let _ = app_clone.emit("ptt:recording", serde_json::json!({
+                                            "recording": false,
+                                            "sessionId": result_session_id
+                                        }));
 
-                                        // emit result event with mode
+                                        // emit result event with mode and session id
                                         let _ = app_clone.emit("ptt:result", serde_json::json!({
                                             "text": text,
                                             "screenshot": screenshot,
-                                            "mode": mode
+                                            "mode": mode,
+                                            "sessionId": result_session_id
                                         }));
                                     }
                                 });
@@ -776,6 +828,7 @@ fn main() {
             session: Arc::new(voice::PushToTalkSession::new()),
             screenshot: std::sync::Mutex::new(None),
             mode: std::sync::Mutex::new(None),
+            current_session_id: std::sync::Mutex::new(0),
         })
         .setup(|app| {
             // hide from dock - menubar app only
@@ -1000,6 +1053,7 @@ fn main() {
             debug_log,
             show_mini_window,
             hide_mini_window,
+            position_mini_window,
             show_main_window,
             hide_main_window,
             show_spotlight_window,
@@ -1019,6 +1073,7 @@ fn main() {
             storage_cmd::save_conversation,
             storage_cmd::delete_conversation,
             storage_cmd::search_conversations,
+            storage_cmd::set_conversation_voice_mode,
             voice_cmd::start_voice,
             voice_cmd::stop_voice,
             voice_cmd::is_voice_running,
@@ -1035,6 +1090,8 @@ fn main() {
             permissions::reset_browser_profile,
             permissions::get_api_key_status,
             permissions::save_api_key,
+            permissions::get_voice_settings,
+            permissions::save_voice_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
