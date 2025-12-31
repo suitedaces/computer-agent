@@ -5,6 +5,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, Send, X, Volume2, Maximize2 } from "lucide-react";
 import ChatView from "./components/ChatView";
+import MessagesDisplay from "./components/MessagesDisplay";
 import { useAgent } from "./hooks/useAgent";
 import { useAgentStore } from "./stores/agentStore";
 import VoiceOrb from "./components/VoiceOrb";
@@ -29,9 +30,8 @@ export default function MiniWindow() {
   const pttPhaseRef = useRef<"idle" | "recording" | "stoppedWaiting">("idle");
   const pttStoppedAtRef = useRef(0);
 
-  // voice response mode - shows speak output in mini window
+  // voice response mode - shows ChatView in mini window
   const [voiceResponseMode, setVoiceResponseMode] = useState(false);
-  const [voiceResponseText, setVoiceResponseText] = useState("");
 
   useEffect(() => {
     submitRef.current = submit;
@@ -154,9 +154,8 @@ export default function MiniWindow() {
         setVoiceMode(true);
         // enter voice response mode - stay in mini window
         setVoiceResponseMode(true);
-        setVoiceResponseText("");
         // resize and reposition to top right
-        await invoke("position_mini_window", { width: 320, height: 140 });
+        await invoke("position_mini_window", { width: 320, height: 280 });
         // pass mode override if not "current" (which means use UI selection)
         const modeOverride = mode && mode !== "current" ? mode : undefined;
         console.log("[ptt] submitting:", text, "mode:", modeOverride);
@@ -166,11 +165,10 @@ export default function MiniWindow() {
       }
     });
 
-    // listen for speak events to show in voice response mode
+    // listen for speak events - messages come through store via useAgent
     const unlisten8 = listen<{ audio: string; text: string }>("agent:speak", (e) => {
       console.log("[mini] speak:", e.payload.text.slice(0, 50) + "...");
-      setVoiceResponseText(e.payload.text);
-      // audio is played by main window via useAgent
+      // audio is played by main window via useAgent, messages go to store
     });
 
     // PTT error
@@ -398,18 +396,16 @@ export default function MiniWindow() {
     );
   }
 
-  // voice response mode - shows speak output
+  // voice response mode - shows messages in mini window
   if (voiceResponseMode) {
     const handleExpandToMain = async () => {
       setVoiceResponseMode(false);
-      setVoiceResponseText("");
       await invoke("show_spotlight_window");
       await invoke("show_mini_window");
     };
 
     const handleDismiss = async () => {
       setVoiceResponseMode(false);
-      setVoiceResponseText("");
       await invoke("show_mini_window");
     };
 
@@ -417,38 +413,32 @@ export default function MiniWindow() {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="h-screen w-screen flex flex-col p-3 bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10"
+        className="h-screen w-screen flex flex-col bg-black/90 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden"
       >
-        <div className="flex items-start gap-2 flex-1 min-h-0">
-          <div className="shrink-0 w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center">
+        {/* mini header with actions */}
+        <div className="flex items-center justify-between px-2 py-1.5 border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-1.5">
             <Volume2 size={12} className={`text-orange-300 ${isRunning ? "animate-pulse" : ""}`} />
+            <span className="text-[10px] text-white/40">voice</span>
           </div>
-          <div className="flex-1 min-w-0 overflow-hidden">
-            {voiceResponseText ? (
-              <p className="text-[13px] text-white/90 leading-relaxed line-clamp-3">
-                {voiceResponseText}
-              </p>
-            ) : (
-              <p className="text-[13px] text-white/50 italic">
-                {isRunning ? "working..." : "listening..."}
-              </p>
-            )}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleDismiss}
+              className="px-2 py-0.5 rounded text-[10px] text-white/40 hover:text-white/60 hover:bg-white/5 transition-colors"
+            >
+              Dismiss
+            </button>
+            <button
+              onClick={handleExpandToMain}
+              className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-white/60 hover:bg-white/15 hover:text-white/80 transition-colors flex items-center gap-1"
+            >
+              <Maximize2 size={10} />
+            </button>
           </div>
         </div>
-        <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-white/5">
-          <button
-            onClick={handleDismiss}
-            className="px-3 py-1 rounded-lg text-[11px] text-white/50 hover:text-white/70 hover:bg-white/5 transition-colors"
-          >
-            Dismiss
-          </button>
-          <button
-            onClick={handleExpandToMain}
-            className="px-3 py-1 rounded-lg bg-white/10 text-[11px] text-white/70 hover:bg-white/15 hover:text-white/90 transition-colors flex items-center gap-1"
-          >
-            <Maximize2 size={10} />
-            Expand
-          </button>
+        {/* messages display */}
+        <div className="flex-1 min-h-0 overflow-hidden p-2">
+          <MessagesDisplay className="h-full" />
         </div>
       </motion.div>
     );
