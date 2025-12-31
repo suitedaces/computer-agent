@@ -56,6 +56,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   inputText: "",
   selectedModel: "claude-haiku-4-5-20251001" as ModelId,
   selectedMode: "browser" as AgentMode,
+  voiceMode: false,
   streamingText: "",
   streamingThinking: "",
   conversationId: null,
@@ -107,6 +108,8 @@ export const useAgentStore = create<AgentState>((set) => ({
   setSelectedModel: (selectedModel) => set({ selectedModel }),
 
   setSelectedMode: (selectedMode) => set({ selectedMode }),
+
+  setVoiceMode: (voiceMode) => set({ voiceMode }),
 
   clearMessages: () => set({ messages: [], conversationId: null, streamingText: "", streamingThinking: "" }),
 

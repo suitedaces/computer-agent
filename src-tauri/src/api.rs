@@ -143,7 +143,7 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self, mode: AgentMode) -> Vec<serde_json::Value> {
+    fn build_tools(&self, mode: AgentMode, voice_mode: bool) -> Vec<serde_json::Value> {
         let mut tools = Vec::new();
 
         match mode {
@@ -169,6 +169,24 @@ impl AnthropicClient {
             "name": "bash"
         }));
 
+        // speak tool for voice mode
+        if voice_mode {
+            tools.push(serde_json::json!({
+                "name": "speak",
+                "description": "Speak text aloud to the user via text-to-speech. Use for important information, confirmations, and answers. Keep speech concise and conversational (1-3 sentences max).",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The text to speak aloud. Use natural spoken language, not markdown or code."
+                        }
+                    },
+                    "required": ["text"]
+                }
+            }));
+        }
+
         tools
     }
 
@@ -177,13 +195,19 @@ impl AnthropicClient {
         messages: Vec<Message>,
         event_tx: mpsc::UnboundedSender<StreamEvent>,
         mode: AgentMode,
+        voice_mode: bool,
     ) -> Result<ApiResult, ApiError> {
-        let system = match mode {
+        let mut system = match mode {
             AgentMode::Computer => SYSTEM_PROMPT.to_string(),
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
         };
 
-        let tools = self.build_tools(mode);
+        // append voice instructions when voice mode is active
+        if voice_mode {
+            system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
+        }
+
+        let tools = self.build_tools(mode, voice_mode);
         println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
         println!("[api] Tools JSON: {}", serde_json::to_string_pretty(&tools).unwrap_or_default());
 
@@ -533,6 +557,15 @@ Use bash for file operations.
 If browser tools fail with connection errors, Chrome may have been closed. Run this bash command to relaunch it with debugging enabled:
 open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.taskhomie-chrome" --profile-directory=Default --no-first-run
 Then wait a few seconds and retry the browser tool."#;
+
+const VOICE_SYSTEM_PROMPT_APPEND: &str = r#"
+
+VOICE MODE: You have a speak tool to talk to the user.
+- Use speak() for important information, confirmations, and answers
+- Keep speech SHORT - 1-3 sentences max per call
+- Use natural spoken language, not markdown or code
+- Don't narrate your actions ("I'll now..."), just do them
+- Continue working after speaking - don't wait for acknowledgment"#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![

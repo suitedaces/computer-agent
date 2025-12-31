@@ -86,6 +86,7 @@ export interface AgentState {
   inputText: string;
   selectedModel: ModelId;
   selectedMode: AgentMode;
+  voiceMode: boolean;
   streamingText: string;
   streamingThinking: string;
   conversationId: string | null;
@@ -98,6 +99,7 @@ export interface AgentState {
   setInputText: (text: string) => void;
   setSelectedModel: (model: ModelId) => void;
   setSelectedMode: (mode: AgentMode) => void;
+  setVoiceMode: (voiceMode: boolean) => void;
   clearMessages: () => void;
   setMessages: (messages: ChatMessage[]) => void;
   appendStreamingText: (text: string) => void;

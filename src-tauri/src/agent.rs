@@ -3,6 +3,7 @@ use crate::storage::{self, Conversation};
 use crate::bash::BashExecutor;
 use crate::browser::{BrowserClient, SharedBrowserClient};
 use crate::computer::{ComputerAction, ComputerControl, ComputerError};
+use crate::voice::{create_tts_client, TtsClient};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -94,6 +95,7 @@ impl Agent {
         instructions: String,
         model: String,
         mode: AgentMode,
+        voice_mode: bool,
         history: Vec<HistoryMessage>,
         context_screenshot: Option<String>,
         conversation_id: Option<String>,
@@ -166,6 +168,22 @@ impl Agent {
 
         let client = AnthropicClient::new(api_key, model.clone());
         let mut messages: Vec<Message> = Vec::new();
+
+        // init TTS client for voice mode
+        let tts_client: Option<TtsClient> = if voice_mode {
+            match create_tts_client() {
+                Some(tts) => {
+                    println!("[agent] TTS client initialized for voice mode");
+                    Some(tts)
+                }
+                None => {
+                    println!("[agent] Voice mode requested but ELEVENLABS_API_KEY not set");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // load existing conversation or create new one
         let mode_str = match mode {
@@ -310,7 +328,7 @@ impl Agent {
                 }
             });
 
-            let api_result = match client.send_message_streaming(messages.clone(), event_tx, mode).await {
+            let api_result = match client.send_message_streaming(messages.clone(), event_tx, mode, voice_mode).await {
                 Ok(result) => {
                     println!("[agent] API streaming response complete, {} blocks, usage: {:?}", result.content.len(), result.usage);
                     result
@@ -619,6 +637,51 @@ impl Agent {
                                     tool_use_id: id.clone(),
                                     content: vec![ToolResultContent::Text { text: err_msg }],
                                 });
+                            }
+                        } else if name == "speak" {
+                            // handle speak tool for voice mode
+                            if let Some(text) = input.get("text").and_then(|t| t.as_str()) {
+                                let preview = if text.len() > 50 {
+                                    format!("🔊 {}...", &text[..50])
+                                } else {
+                                    format!("🔊 {}", text)
+                                };
+                                self.emit(&app_handle, "action", &preview, Some(input.clone()), None);
+
+                                if let Some(ref tts) = tts_client {
+                                    match tts.synthesize(text).await {
+                                        Ok(audio_base64) => {
+                                            println!("[agent] TTS synthesized {} bytes", audio_base64.len());
+                                            // emit audio to frontend for playback
+                                            let _ = app_handle.emit("agent:speak", serde_json::json!({
+                                                "audio": audio_base64,
+                                                "text": text,
+                                            }));
+
+                                            tool_results.push(ContentBlock::ToolResult {
+                                                tool_use_id: id.clone(),
+                                                content: vec![ToolResultContent::Text {
+                                                    text: "Speech delivered.".to_string(),
+                                                }],
+                                            });
+                                        }
+                                        Err(e) => {
+                                            let err_msg = format!("TTS error: {}", e);
+                                            println!("[agent] TTS failed: {}", err_msg);
+                                            tool_results.push(ContentBlock::ToolResult {
+                                                tool_use_id: id.clone(),
+                                                content: vec![ToolResultContent::Text { text: err_msg }],
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    tool_results.push(ContentBlock::ToolResult {
+                                        tool_use_id: id.clone(),
+                                        content: vec![ToolResultContent::Text {
+                                            text: "TTS not available - ELEVENLABS_API_KEY not set".to_string(),
+                                        }],
+                                    });
+                                }
                             }
                         }
                     }

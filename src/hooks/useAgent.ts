@@ -4,12 +4,31 @@ import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
 
+// play base64-encoded mp3 audio
+function playAudio(base64Audio: string) {
+  try {
+    const binaryString = atob(base64Audio);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: "audio/mpeg" });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    audio.play().catch(console.error);
+  } catch (e) {
+    console.error("Audio playback failed:", e);
+  }
+}
+
 export function useAgent() {
   const {
     isRunning,
     inputText,
     selectedModel,
     selectedMode,
+    voiceMode,
     messages,
     conversationId,
     setIsRunning,
@@ -137,10 +156,18 @@ export function useAgent() {
       setConversationId(event.payload);
     });
 
+    // speak event listener for voice mode TTS
+    const unlistenSpeakPromise = listen<{ audio: string; text: string }>("agent:speak", (event) => {
+      const { audio, text } = event.payload;
+      console.log("[voice] Speaking:", text.slice(0, 50) + "...");
+      playAudio(audio);
+    });
+
     return () => {
       unlistenPromise.then((fn) => fn());
       unlistenStreamPromise.then((fn) => fn());
       unlistenConvIdPromise.then((fn) => fn());
+      unlistenSpeakPromise.then((fn) => fn());
     };
   }, [setIsRunning, addMessage, markLastActionComplete, updateLastBashWithResult, setApiKeySet, appendStreamingText, clearStreamingText, appendStreamingThinking, clearStreamingThinking, setConversationId]);
 
@@ -160,14 +187,14 @@ export function useAgent() {
     const mode = overrideMode ?? selectedMode;
 
     try {
-      await invoke("run_agent", { instructions: text, model: selectedModel, mode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
+      await invoke("run_agent", { instructions: text, model: selectedModel, mode, voiceMode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
     } catch (error) {
       // on early failure, show the user message so they know what failed
       addMessage({ role: "user", content: text });
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, selectedModel, selectedMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
+  }, [inputText, isRunning, selectedModel, selectedMode, voiceMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {

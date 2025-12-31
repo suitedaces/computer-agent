@@ -1,13 +1,94 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bytes::{BufMut, BytesMut};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
+use thiserror::Error;
 
 use deepgram::common::options::{Encoding, Model, Options};
 use deepgram::common::stream_response::StreamResponse;
 use deepgram::Deepgram;
 use futures::StreamExt;
+
+// ============================================================================
+// ElevenLabs TTS (Text-to-Speech)
+// ============================================================================
+
+const ELEVENLABS_API_URL: &str = "https://api.elevenlabs.io/v1/text-to-speech";
+
+#[derive(Error, Debug)]
+pub enum TtsError {
+    #[error("HTTP request failed: {0}")]
+    Request(#[from] reqwest::Error),
+    #[error("API error: {0}")]
+    Api(String),
+}
+
+pub struct TtsClient {
+    client: reqwest::Client,
+    api_key: String,
+    voice_id: String,
+    model_id: String,
+}
+
+impl TtsClient {
+    pub fn new(api_key: String, voice_id: String) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            api_key,
+            voice_id,
+            model_id: "eleven_flash_v2_5".to_string(), // 75ms latency
+        }
+    }
+
+    /// synthesize text to speech, returns base64-encoded mp3 audio
+    pub async fn synthesize(&self, text: &str) -> Result<String, TtsError> {
+        let url = format!("{}/{}/stream", ELEVENLABS_API_URL, self.voice_id);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("xi-api-key", &self.api_key)
+            .header("Content-Type", "application/json")
+            .query(&[("output_format", "mp3_44100_128")])
+            .json(&serde_json::json!({
+                "text": text,
+                "model_id": self.model_id,
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75,
+                    "speed": 1.0
+                }
+            }))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(TtsError::Api(format!("HTTP {}: {}", status, body)));
+        }
+
+        let bytes = response.bytes().await?;
+        let base64_audio = BASE64.encode(&bytes);
+
+        Ok(base64_audio)
+    }
+}
+
+/// create TTS client from environment variables
+pub fn create_tts_client() -> Option<TtsClient> {
+    let api_key = std::env::var("ELEVENLABS_API_KEY").ok()?;
+    let voice_id = std::env::var("ELEVENLABS_VOICE_ID")
+        .unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string()); // default: Rachel
+
+    Some(TtsClient::new(api_key, voice_id))
+}
+
+// ============================================================================
+// Deepgram STT (Speech-to-Text)
+// ============================================================================
 
 #[derive(Clone, serde::Serialize)]
 pub struct TranscriptionEvent {
