@@ -662,9 +662,34 @@ fn main() {
                                 let app_clone = app.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
-                                        let text = ptt_state.session.stop().await;
+                                        let raw_text = ptt_state.session.stop().await;
                                         let screenshot = ptt_state.screenshot.lock().unwrap().take();
                                         let mode = ptt_state.mode.lock().unwrap().take();
+
+                                        // rewrite transcription to clean up speech artifacts
+                                        let text = if !raw_text.trim().is_empty() {
+                                            match std::env::var("ANTHROPIC_API_KEY") {
+                                                Ok(api_key) => {
+                                                    println!("[ptt] rewriting transcription...");
+                                                    match crate::api::rewrite_transcription(&api_key, &raw_text).await {
+                                                        Ok(rewritten) => {
+                                                            println!("[ptt] rewritten: '{}' -> '{}'", raw_text, rewritten);
+                                                            rewritten
+                                                        }
+                                                        Err(e) => {
+                                                            println!("[ptt] rewrite failed: {}, using raw", e);
+                                                            raw_text
+                                                        }
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    println!("[ptt] no ANTHROPIC_API_KEY, skipping rewrite");
+                                                    raw_text
+                                                }
+                                            }
+                                        } else {
+                                            raw_text
+                                        };
 
                                         println!("[ptt] result: text='{}', screenshot={}, mode={:?}", text, screenshot.is_some(), mode);
 

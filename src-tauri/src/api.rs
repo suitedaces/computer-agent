@@ -437,6 +437,75 @@ impl AnthropicClient {
     }
 }
 
+/// rewrite raw speech transcription into clean text using haiku
+pub async fn rewrite_transcription(api_key: &str, raw_text: &str) -> Result<String, ApiError> {
+    if raw_text.trim().is_empty() {
+        return Ok(String::new());
+    }
+
+    let client = Client::new();
+
+    let prompt = format!(
+        r#"<context>
+This is raw speech-to-text output from voice dictation. It may contain filler words, false starts, repeated phrases, incomplete thoughts, or trailing fragments from when the user released the push-to-talk key.
+</context>
+
+<instructions>
+Rewrite this into clean, natural text that preserves the speaker's intent. Remove filler words (um, uh, like, you know), fix incomplete sentences, merge repeated phrases, and clean up any trailing fragments.
+
+Output only the rewritten text. No explanations, no quotes, no prefixes.
+</instructions>
+
+<input>
+{}
+</input>"#,
+        raw_text
+    );
+
+    let request_body = serde_json::json!({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 1024,
+        "messages": [{
+            "role": "user",
+            "content": prompt
+        }]
+    });
+
+    let response = client
+        .post(ANTHROPIC_API_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", API_VERSION)
+        .header("content-type", "application/json")
+        .json(&request_body)
+        .send()
+        .await?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await?;
+        if let Ok(err) = serde_json::from_str::<ApiErrorResponse>(&body) {
+            return Err(ApiError::Api(err.error.message));
+        }
+        return Err(ApiError::Api(format!("HTTP {}: {}", status, body)));
+    }
+
+    let body: serde_json::Value = response.json().await?;
+
+    // extract text from first content block
+    if let Some(content) = body.get("content").and_then(|c| c.as_array()) {
+        for block in content {
+            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                    return Ok(text.trim().to_string());
+                }
+            }
+        }
+    }
+
+    // fallback to raw text if parsing fails
+    Ok(raw_text.to_string())
+}
+
 const SYSTEM_PROMPT: &str = r#"You are taskhomie, a macOS computer control agent. You see the screen, control mouse/keyboard, and run bash.
 
 Keep text responses very concise. Focus on doing, not explaining. Use tools on every turn.
