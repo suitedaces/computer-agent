@@ -173,13 +173,13 @@ impl AnthropicClient {
         if voice_mode {
             tools.push(serde_json::json!({
                 "name": "speak",
-                "description": "Speak text aloud to the user via text-to-speech. Use for important information, confirmations, and answers. Keep speech concise and conversational (1-3 sentences max).",
+                "description": "Speak to the user via text-to-speech. This is your only communication channel - the user cannot see any text you write. Use speak() for responses, confirmations, questions, and updates. Keep it conversational and concise (1-3 sentences).",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "text": {
                             "type": "string",
-                            "description": "The text to speak aloud. Use natural spoken language, not markdown or code."
+                            "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
                         }
                     },
                     "required": ["text"]
@@ -560,12 +560,22 @@ Then wait a few seconds and retry the browser tool."#;
 
 const VOICE_SYSTEM_PROMPT_APPEND: &str = r#"
 
-VOICE MODE: You have a speak tool to talk to the user.
-- Use speak() for important information, confirmations, and answers
-- Keep speech SHORT - 1-3 sentences max per call
-- Use natural spoken language, not markdown or code
-- Don't narrate your actions ("I'll now..."), just do them
-- Continue working after speaking - don't wait for acknowledgment"#;
+<voice_mode>
+You are in voice mode. The user is listening, not reading. They cannot see any text you output - your text blocks are invisible to them. The speak tool is your only way to communicate.
+
+Output behavior:
+- Text blocks are for your internal reasoning only (like thinking). The user never sees them.
+- speak() is the only way the user hears from you. Without it, you are silent.
+- Call speak() for all responses, confirmations, questions, errors, and status updates.
+
+Speech style:
+- Conversational and concise (1-3 sentences per call)
+- Natural spoken language - say "two hundred" not "200", spell out abbreviations
+- No markdown, code blocks, URLs, or formatting - just words
+- Don't narrate your actions ("I'll now click...") - just do them and speak results
+
+Continue working after speaking - don't wait for acknowledgment. The user will interrupt if needed.
+</voice_mode>"#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
