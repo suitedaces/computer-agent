@@ -536,10 +536,7 @@ fn main() {
                                         match ptt_state.session.start(api_key, app_clone.clone()).await {
                                             Ok(session_id) => {
                                                 *ptt_state.current_session_id.lock().unwrap() = session_id;
-                                                let _ = app_clone.emit("ptt:recording", serde_json::json!({
-                                                    "recording": true,
-                                                    "sessionId": session_id
-                                                }));
+                                                // session started - first ptt:recording already emitted with mode
                                             }
                                             Err(e) => {
                                                 println!("[ptt] start error: {}", e);

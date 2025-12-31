@@ -31,11 +31,13 @@ export default function VoiceWindow() {
         "ptt:recording",
         (e) => {
           console.log("[VoiceWindow] ptt:recording received:", e.payload);
+          invoke("debug_log", { message: `ptt:recording mode=${e.payload.mode}` }).catch(() => {});
           if (e.payload.recording) {
             pttDataRef.current = {
               screenshot: e.payload.screenshot || null,
               mode: e.payload.mode || "computer",
             };
+            invoke("debug_log", { message: `pttDataRef set to mode=${pttDataRef.current.mode}` }).catch(() => {});
             setMode("recording");
             setInterim("");
           }
@@ -60,10 +62,12 @@ export default function VoiceWindow() {
             console.log("[VoiceWindow] submitting text:", e.payload.text);
             setVoiceMode(true);
             const data = pttDataRef.current;
+            const modeToUse = data?.mode !== "current" ? data?.mode : undefined;
+            invoke("debug_log", { message: `submitting with mode=${modeToUse}, data.mode=${data?.mode}` }).catch(() => {});
             await submitRef.current(
               e.payload.text,
               data?.screenshot ?? undefined,
-              data?.mode !== "current" ? data?.mode : undefined
+              modeToUse
             );
             console.log("[VoiceWindow] submit complete");
           }
