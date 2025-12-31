@@ -235,6 +235,29 @@ fn hide_voice_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// show main window in voice response mode and emit event
+#[tauri::command]
+fn show_main_voice_response(app_handle: tauri::AppHandle, text: String, screenshot: Option<String>, mode: String) -> Result<(), String> {
+    // emit event to main window so it can switch to voice response mode
+    let _ = app_handle.emit("voice:response", serde_json::json!({
+        "text": text,
+        "screenshot": screenshot,
+        "mode": mode,
+    }));
+
+    // show main panel (frontend will handle sizing via set_window_state)
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = MAIN_PANEL.get() {
+        panel.show();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+    }
+
+    Ok(())
+}
+
 // set main panel click-through (ignores mouse events)
 #[tauri::command]
 fn set_main_click_through(ignore: bool) -> Result<(), String> {
@@ -491,10 +514,11 @@ fn main() {
                                         .ok();
                                 }
 
-                                // show voice window centered
+                                // show voice window centered at 300x300
                             #[cfg(target_os = "macos")]
                             {
                                 if let Some(window) = app.get_webview_window("voice") {
+                                    let _ = window.set_size(tauri::LogicalSize::new(300.0, 300.0));
                                     let info = get_screen_info();
                                     let x = ((info.width - 300.0) / 2.0) * info.scale;
                                     let y = ((info.height - 300.0) / 2.0) * info.scale;
@@ -599,20 +623,7 @@ fn main() {
 
                                         println!("[ptt] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
 
-                                        // hide voice window only if we got text (frontend shows retry UI otherwise)
-                                        #[cfg(target_os = "macos")]
-                                        {
-                                            let has_text = !text.trim().is_empty();
-                                            println!("[ptt] has_text={}, hiding voice window: {}", has_text, has_text);
-                                            if has_text {
-                                                // must dispatch to main thread for NSPanel operations
-                                                dispatch::Queue::main().exec_sync(|| {
-                                                    if let Some(panel) = VOICE_PANEL.get() {
-                                                        panel.hide();
-                                                    }
-                                                });
-                                            }
-                                        }
+                                        // frontend handles voice window visibility via responding mode
 
                                         let _ = app_clone.emit("ptt:recording", serde_json::json!({
                                             "recording": false,
@@ -831,6 +842,7 @@ fn main() {
             set_window_state,
             show_voice_window,
             hide_voice_window,
+            show_main_voice_response,
             set_main_click_through,
             show_border_overlay,
             hide_border_overlay,
