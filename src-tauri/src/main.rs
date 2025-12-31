@@ -175,6 +175,7 @@ fn debug_log(message: String) {
 // unified window state command - frontend tells backend what size/position it needs
 #[tauri::command]
 fn set_window_state(app_handle: tauri::AppHandle, width: f64, height: f64, centered: bool) -> Result<(), String> {
+    println!("[window] set_window_state: {}x{}, centered={}", width, height, centered);
     #[cfg(target_os = "macos")]
     {
         if let Some(window) = app_handle.get_webview_window("main") {
@@ -182,8 +183,6 @@ fn set_window_state(app_handle: tauri::AppHandle, width: f64, height: f64, cente
             if centered {
                 position_window_center(&window, width, height);
             } else {
-                // for non-centered (idle/expanded), keep at top-right or preserve position
-                // only reposition if window is at default location
                 position_window_top_right(&window, width, height);
             }
             if let Some(panel) = MAIN_PANEL.get() {
@@ -492,13 +491,27 @@ fn main() {
                                         .ok();
                                 }
 
-                                // emit recording event with screenshot and mode
-                                let _ = app.emit("ptt:recording", serde_json::json!({
-                                    "recording": true,
-                                    "screenshot": screenshot,
-                                    "mode": mode,
-                                    "sessionId": 0
-                                }));
+                                // show voice window centered
+                            #[cfg(target_os = "macos")]
+                            {
+                                if let Some(window) = app.get_webview_window("voice") {
+                                    let info = get_screen_info();
+                                    let x = ((info.width - 300.0) / 2.0) * info.scale;
+                                    let y = ((info.height - 300.0) / 2.0) * info.scale;
+                                    let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
+                                }
+                                if let Some(panel) = VOICE_PANEL.get() {
+                                    panel.show();
+                                }
+                            }
+
+                            // emit recording event with screenshot and mode
+                            let _ = app.emit("ptt:recording", serde_json::json!({
+                                "recording": true,
+                                "screenshot": screenshot,
+                                "mode": mode,
+                                "sessionId": 0
+                            }));
 
                                 // start PTT recording via command
                                 let app_clone = app.clone();
@@ -588,6 +601,21 @@ fn main() {
                                         };
 
                                         println!("[ptt] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
+
+                                        // hide voice window only if we got text (frontend shows retry UI otherwise)
+                                        #[cfg(target_os = "macos")]
+                                        {
+                                            let has_text = !text.trim().is_empty();
+                                            println!("[ptt] has_text={}, hiding voice window: {}", has_text, has_text);
+                                            if has_text {
+                                                // must dispatch to main thread for NSPanel operations
+                                                dispatch::Queue::main().exec_sync(|| {
+                                                    if let Some(panel) = VOICE_PANEL.get() {
+                                                        panel.hide();
+                                                    }
+                                                });
+                                            }
+                                        }
 
                                         let _ = app_clone.emit("ptt:recording", serde_json::json!({
                                             "recording": false,

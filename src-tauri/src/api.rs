@@ -209,7 +209,6 @@ impl AnthropicClient {
 
         let tools = self.build_tools(mode, voice_mode);
         println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
-        println!("[api] Tools JSON: {}", serde_json::to_string_pretty(&tools).unwrap_or_default());
 
         let request = ApiRequest {
             model: self.model.clone(),

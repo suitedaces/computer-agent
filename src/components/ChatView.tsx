@@ -959,9 +959,9 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
       transition={{ duration: 0.12, ease: "easeOut" }}
       className={`h-screen flex flex-col ${panelClass} overflow-hidden`}
     >
-      {/* titlebar - hidden for mini and compact */}
+      {/* titlebar - hidden for mini, draggable for compact */}
       {!hideHeader && (
-        <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
+        <div data-tauri-drag-region className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
           {settingsOpen ? (
             <>
               <button

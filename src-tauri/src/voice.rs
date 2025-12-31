@@ -392,16 +392,19 @@ async fn run_deepgram_streaming(
         .sample_rate(sample_rate)
         .encoding(Encoding::Linear16);
 
+    println!("[deepgram] connecting with sample_rate={}...", sample_rate);
     let mut results = request
         .stream(ws_rx)
         .await
         .map_err(|e| format!("stream failed: {}", e))?;
+    println!("[deepgram] connected, waiting for transcripts...");
 
     while is_running.load(Ordering::SeqCst) {
         tokio::select! {
             result = results.next() => {
                 match result {
                     Some(Ok(response)) => {
+                        println!("[deepgram] got response: {:?}", response);
                         if let StreamResponse::TranscriptResponse { channel, is_final, .. } = response {
                             if let Some(alt) = channel.alternatives.first() {
                                 let text = &alt.transcript;
@@ -412,12 +415,16 @@ async fn run_deepgram_streaming(
                         }
                     }
                     Some(Err(e)) => println!("[deepgram] error: {}", e),
-                    None => break,
+                    None => {
+                        println!("[deepgram] stream ended (None)");
+                        break;
+                    }
                 }
             }
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {}
         }
     }
+    println!("[deepgram] loop exited");
 
     Ok(())
 }
@@ -570,6 +577,7 @@ impl PushToTalkSession {
                             }
                             acc.push_str(text);
                             // emit full accumulated text
+                            println!("[ptt] emitting ptt:interim: {}", acc.clone());
                             let _ = app_cb.emit("ptt:interim", acc.clone());
                         } else {
                             // emit accumulated + current interim

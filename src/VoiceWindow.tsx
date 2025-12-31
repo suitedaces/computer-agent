@@ -6,10 +6,12 @@ import { useAgent } from "./hooks/useAgent";
 import { useAgentStore } from "./stores/agentStore";
 import { motion } from "framer-motion";
 
-type State = "hidden" | "recording" | "retry";
+// recording or retry - backend controls window visibility
+type Mode = "recording" | "retry";
 
 export default function VoiceWindow() {
-  const [state, setState] = useState<State>("hidden");
+  console.log("[VoiceWindow] render");
+  const [mode, setMode] = useState<Mode>("recording");
   const [interim, setInterim] = useState("");
   const { submit } = useAgent();
   const setVoiceMode = useAgentStore((s) => s.setVoiceMode);
@@ -22,36 +24,40 @@ export default function VoiceWindow() {
   }, [submit]);
 
   useEffect(() => {
+    console.log("[VoiceWindow] mounting event listeners...");
+    invoke("debug_log", { message: "VoiceWindow mounting event listeners" }).catch(() => {});
     const listeners = [
       listen<{ recording: boolean; screenshot?: string; mode?: string }>(
         "ptt:recording",
         (e) => {
+          console.log("[VoiceWindow] ptt:recording received:", e.payload);
           if (e.payload.recording) {
             pttDataRef.current = {
               screenshot: e.payload.screenshot || null,
               mode: e.payload.mode || "computer",
             };
-            setState("recording");
+            setMode("recording");
             setInterim("");
-            invoke("show_voice_window").catch(console.error);
           }
         }
       ),
 
       listen<string>("ptt:interim", (e) => {
+        console.log("[VoiceWindow] ptt:interim received:", e.payload);
+        invoke("debug_log", { message: `VoiceWindow got interim: ${e.payload}` }).catch(() => {});
         setInterim(e.payload);
       }),
 
       listen<{ text: string; screenshot?: string; mode?: string }>(
         "ptt:result",
         async (e) => {
+          console.log("[VoiceWindow] ptt:result received:", e.payload);
           const hasText = !!e.payload.text.trim();
           if (!hasText) {
-            setState("retry");
+            setMode("retry");
           } else {
-            setState("hidden");
-            invoke("hide_voice_window").catch(console.error);
-            // submit with voice mode enabled
+            // backend hides window, submit with voice mode
+            console.log("[VoiceWindow] submitting text:", e.payload.text);
             setVoiceMode(true);
             const data = pttDataRef.current;
             await submitRef.current(
@@ -59,14 +65,13 @@ export default function VoiceWindow() {
               data?.screenshot ?? undefined,
               data?.mode !== "current" ? data?.mode : undefined
             );
+            console.log("[VoiceWindow] submit complete");
           }
           pttDataRef.current = null;
         }
       ),
 
       listen("ptt:error", () => {
-        setState("hidden");
-        invoke("hide_voice_window").catch(console.error);
         pttDataRef.current = null;
       }),
     ];
@@ -77,17 +82,12 @@ export default function VoiceWindow() {
   }, [setVoiceMode]);
 
   const handleDismiss = () => {
-    setState("hidden");
+    setMode("recording"); // reset for next time
     invoke("hide_voice_window").catch(console.error);
   };
 
-  // hidden state - render nothing (window is hidden anyway)
-  if (state === "hidden") {
-    return <div className="h-full w-full" />;
-  }
-
-  // recording state
-  if (state === "recording") {
+  // always render - backend controls visibility
+  if (mode === "recording") {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center bg-transparent">
         <VoiceOrb isActive={true} volume={0.3} size={180} />
@@ -104,7 +104,7 @@ export default function VoiceWindow() {
     );
   }
 
-  // retry state
+  // retry mode
   return (
     <div className="h-full w-full flex flex-col items-center justify-center bg-transparent">
       <VoiceOrb isActive={false} volume={0} size={180} />
