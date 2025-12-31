@@ -84,10 +84,15 @@ export default function MainWindow() {
   const helpPromptRef = useRef("");
   const spotlightPromptRef = useRef("");
   const submitRef = useRef(submit);
+  const stateRef = useRef(state);
 
   useEffect(() => {
     submitRef.current = submit;
   }, [submit]);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // sync window size/position with state
   useEffect(() => {
@@ -144,6 +149,14 @@ export default function MainWindow() {
       // spotlight mode (Cmd+Shift+Space)
       listen("hotkey-spotlight", () => {
         dispatch({ type: "SPOTLIGHT" });
+      }),
+
+      // dismiss spotlight on blur (click away)
+      listen("window:blur", () => {
+        if (stateRef.current.mode === "spotlight") {
+          dispatch({ type: "SPOTLIGHT_CANCEL" });
+          invoke("hide_main_window").catch(() => {});
+        }
       }),
     ];
 

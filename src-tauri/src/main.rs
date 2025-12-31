@@ -681,6 +681,11 @@ fn main() {
                         #[cfg(target_os = "macos")]
                         if let Some(panel) = MAIN_PANEL.get() {
                             panel.show();
+                            // make panel key window so input receives focus
+                            let ns_panel = panel.as_panel();
+                            unsafe {
+                                let _: () = objc2::msg_send![ns_panel, makeKeyAndOrderFront: std::ptr::null::<objc2::runtime::AnyObject>()];
+                            }
                         }
                     }
 
@@ -855,8 +860,13 @@ fn main() {
 
             Ok(())
         })
-        .on_window_event(|_window, _event| {
-            // disabled auto-hide for now
+        .on_window_event(|window, event| {
+            // emit focus lost event for main window (spotlight dismiss)
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Focused(false) = event {
+                    let _ = window.emit("window:blur", ());
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             set_api_key,
