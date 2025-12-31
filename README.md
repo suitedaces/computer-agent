@@ -42,7 +42,6 @@ On macOS, you'll need to grant accessibility permissions when prompted (System S
 
 ## Shortcuts
 
-- `⌘⇧V` - push-to-talk (uses current mode)
 - `⌃⇧C` - push-to-talk → computer use mode
 - `⌃⇧B` - push-to-talk → background mode
 - `⌘⇧H` - help mode (screenshot + quick prompt)
