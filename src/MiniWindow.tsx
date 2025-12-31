@@ -22,6 +22,16 @@ export default function MiniWindow() {
   const [pttRecording, setPttRecording] = useState(false);
   const [pttInterim, setPttInterim] = useState("");
   const [pttRetryMode, setPttRetryMode] = useState(false);
+  const submitRef = useRef(submit);
+  const lastPttResultRef = useRef<{ text: string; at: number } | null>(null);
+  const pttSessionIdRef = useRef(0);
+  const pttHandledSessionRef = useRef<number | null>(null);
+  const pttPhaseRef = useRef<"idle" | "recording" | "stoppedWaiting">("idle");
+  const pttStoppedAtRef = useRef(0);
+
+  useEffect(() => {
+    submitRef.current = submit;
+  }, [submit]);
 
   // poll running state and resize window
   useEffect(() => {
@@ -72,6 +82,12 @@ export default function MiniWindow() {
       if (e.payload.recording) {
         setPttInterim("");
         setPttRetryMode(false);
+        pttSessionIdRef.current += 1;
+        pttHandledSessionRef.current = null;
+        pttPhaseRef.current = "recording";
+      } else {
+        pttPhaseRef.current = "stoppedWaiting";
+        pttStoppedAtRef.current = Date.now();
       }
     });
 
@@ -88,6 +104,24 @@ export default function MiniWindow() {
       setPttInterim("");
 
       const { text, screenshot, mode } = e.payload;
+      const sessionId = pttSessionIdRef.current;
+      if (pttHandledSessionRef.current === sessionId) {
+        console.log("[ptt] duplicate session result ignored");
+        return;
+      }
+      const now = Date.now();
+      if (pttPhaseRef.current !== "stoppedWaiting" || now - pttStoppedAtRef.current > 3000) {
+        console.log("[ptt] stale result ignored");
+        return;
+      }
+      pttPhaseRef.current = "idle";
+      pttHandledSessionRef.current = sessionId;
+      const last = lastPttResultRef.current;
+      if (last && last.text === text && now - last.at < 1500) {
+        console.log("[ptt] duplicate result ignored");
+        return;
+      }
+      lastPttResultRef.current = { text, at: now };
 
       if (!text.trim()) {
         // empty transcription - show retry mode
@@ -108,7 +142,7 @@ export default function MiniWindow() {
         setVoiceMode(true);
         // pass mode override if not "current" (which means use UI selection)
         const modeOverride = mode && mode !== "current" ? mode : undefined;
-        await submit(text, screenshot ?? undefined, modeOverride);
+        await submitRef.current(text, screenshot ?? undefined, modeOverride);
         await invoke("hide_mini_window");
       } catch (err) {
         console.error("[ptt] submit failed:", err);
@@ -120,6 +154,7 @@ export default function MiniWindow() {
       console.error("[ptt] error:", e.payload);
       setPttRecording(false);
       setPttInterim("");
+      pttPhaseRef.current = "idle";
     });
 
     return () => {
@@ -131,7 +166,7 @@ export default function MiniWindow() {
       unlisten6.then((f) => f());
       unlisten7.then((f) => f());
     };
-  }, [submit]);
+  }, []);
 
   const handleOpenMain = async () => {
     try {
