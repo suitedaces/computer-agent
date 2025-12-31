@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, Send, X } from "lucide-react";
+import { ChevronRight, Send, X, Volume2, Maximize2 } from "lucide-react";
 import ChatView from "./components/ChatView";
 import { useAgent } from "./hooks/useAgent";
 import { useAgentStore } from "./stores/agentStore";
@@ -29,6 +29,10 @@ export default function MiniWindow() {
   const pttPhaseRef = useRef<"idle" | "recording" | "stoppedWaiting">("idle");
   const pttStoppedAtRef = useRef(0);
 
+  // voice response mode - shows speak output in mini window
+  const [voiceResponseMode, setVoiceResponseMode] = useState(false);
+  const [voiceResponseText, setVoiceResponseText] = useState("");
+
   useEffect(() => {
     submitRef.current = submit;
   }, [submit]);
@@ -36,7 +40,7 @@ export default function MiniWindow() {
   // poll running state and resize window
   useEffect(() => {
     // don't poll/resize while in special modes - backend handles sizing
-    if (helpMode || pttRecording || pttRetryMode) return;
+    if (helpMode || pttRecording || pttRetryMode || voiceResponseMode) return;
 
     const checkRunning = () => {
       invoke<boolean>("is_agent_running").then((running) => {
@@ -54,7 +58,7 @@ export default function MiniWindow() {
     checkRunning();
     const interval = setInterval(checkRunning, 500);
     return () => clearInterval(interval);
-  }, [helpMode, pttRecording, pttRetryMode]);
+  }, [helpMode, pttRecording, pttRetryMode, voiceResponseMode]);
 
   useEffect(() => {
     const unlisten1 = listen("agent:started", () => {
@@ -63,6 +67,8 @@ export default function MiniWindow() {
 
     const unlisten2 = listen("agent:stopped", () => {
       setIsRunning(false);
+      // keep voice response visible for a moment after agent stops
+      // user can dismiss or expand to main
     });
 
     // hotkey help mode - Cmd+Shift+H triggers this
@@ -142,19 +148,29 @@ export default function MiniWindow() {
         return;
       }
 
-      // has transcription - auto-submit to spotlight
+      // has transcription - submit and show voice response in mini window
       try {
-        await invoke("show_spotlight_window");
-        await new Promise((r) => setTimeout(r, 150));
         // enable voice mode for TTS response when using voice input
         setVoiceMode(true);
+        // enter voice response mode - stay in mini window
+        setVoiceResponseMode(true);
+        setVoiceResponseText("");
+        // resize and reposition to top right
+        await invoke("position_mini_window", { width: 320, height: 140 });
         // pass mode override if not "current" (which means use UI selection)
         const modeOverride = mode && mode !== "current" ? mode : undefined;
+        console.log("[ptt] submitting:", text, "mode:", modeOverride);
         await submitRef.current(text, screenshot ?? undefined, modeOverride);
-        await invoke("hide_mini_window");
       } catch (err) {
         console.error("[ptt] submit failed:", err);
       }
+    });
+
+    // listen for speak events to show in voice response mode
+    const unlisten8 = listen<{ audio: string; text: string }>("agent:speak", (e) => {
+      console.log("[mini] speak:", e.payload.text.slice(0, 50) + "...");
+      setVoiceResponseText(e.payload.text);
+      // audio is played by main window via useAgent
     });
 
     // PTT error
@@ -173,6 +189,7 @@ export default function MiniWindow() {
       unlisten5.then((f) => f());
       unlisten6.then((f) => f());
       unlisten7.then((f) => f());
+      unlisten8.then((f) => f());
     };
   }, []);
 
@@ -378,6 +395,62 @@ export default function MiniWindow() {
           </motion.div>
         </motion.div>
       </div>
+    );
+  }
+
+  // voice response mode - shows speak output
+  if (voiceResponseMode) {
+    const handleExpandToMain = async () => {
+      setVoiceResponseMode(false);
+      setVoiceResponseText("");
+      await invoke("show_spotlight_window");
+      await invoke("show_mini_window");
+    };
+
+    const handleDismiss = async () => {
+      setVoiceResponseMode(false);
+      setVoiceResponseText("");
+      await invoke("show_mini_window");
+    };
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="h-screen w-screen flex flex-col p-3 bg-black/80 backdrop-blur-xl rounded-2xl border border-white/10"
+      >
+        <div className="flex items-start gap-2 flex-1 min-h-0">
+          <div className="shrink-0 w-6 h-6 rounded-full bg-orange-500/20 flex items-center justify-center">
+            <Volume2 size={12} className={`text-orange-300 ${isRunning ? "animate-pulse" : ""}`} />
+          </div>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            {voiceResponseText ? (
+              <p className="text-[13px] text-white/90 leading-relaxed line-clamp-3">
+                {voiceResponseText}
+              </p>
+            ) : (
+              <p className="text-[13px] text-white/50 italic">
+                {isRunning ? "working..." : "listening..."}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-white/5">
+          <button
+            onClick={handleDismiss}
+            className="px-3 py-1 rounded-lg text-[11px] text-white/50 hover:text-white/70 hover:bg-white/5 transition-colors"
+          >
+            Dismiss
+          </button>
+          <button
+            onClick={handleExpandToMain}
+            className="px-3 py-1 rounded-lg bg-white/10 text-[11px] text-white/70 hover:bg-white/15 hover:text-white/90 transition-colors flex items-center gap-1"
+          >
+            <Maximize2 size={10} />
+            Expand
+          </button>
+        </div>
+      </motion.div>
     );
   }
 

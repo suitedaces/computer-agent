@@ -43,6 +43,11 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* mini window needs no border radius for transparent orb */
+body.mini-window #root {
+  border-radius: 0;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;

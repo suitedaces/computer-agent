@@ -183,7 +183,12 @@ export function useAgent() {
 
   const submit = useCallback(async (overrideText?: string, contextScreenshot?: string, overrideMode?: string) => {
     const text = (overrideText ?? inputText).trim();
-    if (!text || isRunning) return;
+    // use fresh isRunning to avoid stale closure
+    const currentIsRunning = useAgentStore.getState().isRunning;
+    if (!text || currentIsRunning) {
+      console.log("[useAgent] submit blocked: text=", !!text, "isRunning=", currentIsRunning);
+      return;
+    }
 
     // build history from past messages (user + assistant responses)
     const history = messages
@@ -200,6 +205,7 @@ export function useAgent() {
     const currentVoiceMode = useAgentStore.getState().voiceMode;
 
     try {
+      console.log("[useAgent] invoking run_agent:", { text: text.slice(0, 50), model: selectedModel, mode, voiceMode: currentVoiceMode, conversationId });
       await invoke("run_agent", { instructions: text, model: selectedModel, mode, voiceMode: currentVoiceMode, history, contextScreenshot: contextScreenshot ?? null, conversationId });
     } catch (error) {
       // on early failure, show the user message so they know what failed
@@ -207,7 +213,7 @@ export function useAgent() {
       addMessage({ role: "assistant", content: String(error), type: "error" });
       setIsRunning(false);
     }
-  }, [inputText, isRunning, selectedModel, selectedMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
+  }, [inputText, selectedModel, selectedMode, messages, conversationId, addMessage, setInputText, setIsRunning]);
 
   const stop = useCallback(async () => {
     try {

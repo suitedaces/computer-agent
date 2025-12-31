@@ -206,6 +206,24 @@ fn hide_mini_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn position_mini_window(app_handle: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.set_size(tauri::LogicalSize::new(width, height));
+        position_window_top_right(&window, width, height);
+        if let Some(panel) = MINI_PANEL.get() {
+            panel.show();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = app_handle.get_webview_window("mini") {
+        let _ = window.set_size(tauri::LogicalSize::new(width, height));
+        let _ = window.show();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -1025,6 +1043,7 @@ fn main() {
             debug_log,
             show_mini_window,
             hide_mini_window,
+            position_mini_window,
             show_main_window,
             hide_main_window,
             show_spotlight_window,
