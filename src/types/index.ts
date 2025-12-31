@@ -78,6 +78,7 @@ export interface Conversation {
   turn_usage: unknown[];
   total_input_tokens: number;
   total_output_tokens: number;
+  voice_mode: boolean;
 }
 
 export interface AgentState {

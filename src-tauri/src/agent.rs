@@ -169,22 +169,6 @@ impl Agent {
         let client = AnthropicClient::new(api_key, model.clone());
         let mut messages: Vec<Message> = Vec::new();
 
-        // init TTS client for voice mode
-        let tts_client: Option<TtsClient> = if voice_mode {
-            match create_tts_client() {
-                Some(tts) => {
-                    println!("[agent] TTS client initialized for voice mode");
-                    Some(tts)
-                }
-                None => {
-                    println!("[agent] Voice mode requested but ELEVENLABS_API_KEY not set");
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
         // load existing conversation or create new one
         let mode_str = match mode {
             AgentMode::Computer => "computer",
@@ -225,8 +209,32 @@ impl Agent {
             )
         };
 
-        // emit conversation id to frontend
+        // effective voice_mode: use frontend value OR persisted conversation value
+        let effective_voice_mode = voice_mode || conversation.voice_mode;
+        // update conversation if voice mode changed
+        if effective_voice_mode != conversation.voice_mode {
+            conversation.voice_mode = effective_voice_mode;
+        }
+
+        // emit conversation id and voice_mode to frontend
         let _ = app_handle.emit("agent:conversation_id", &conversation.id);
+        let _ = app_handle.emit("agent:voice_mode", effective_voice_mode);
+
+        // init TTS client for voice mode
+        let tts_client: Option<TtsClient> = if effective_voice_mode {
+            match create_tts_client() {
+                Some(tts) => {
+                    println!("[agent] TTS client initialized for voice mode");
+                    Some(tts)
+                }
+                None => {
+                    println!("[agent] Voice mode requested but ELEVENLABS_API_KEY not set");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // emit started to all windows with mode
         self.emit_full(&app_handle, "started", "Agent started", None, None, None, Some(mode_str.to_string()));
@@ -281,7 +289,7 @@ impl Agent {
         }
 
         // add text instructions - wrap in voice_input tags if voice mode
-        let text_content = if voice_mode {
+        let text_content = if effective_voice_mode {
             format!("<voice_input>{}</voice_input>", instructions)
         } else {
             instructions.clone()
@@ -341,7 +349,7 @@ impl Agent {
                 }
             });
 
-            let api_result = match client.send_message_streaming(messages.clone(), event_tx, mode, voice_mode).await {
+            let api_result = match client.send_message_streaming(messages.clone(), event_tx, mode, effective_voice_mode).await {
                 Ok(result) => {
                     println!("[agent] API streaming response complete, {} blocks, usage: {:?}", result.content.len(), result.usage);
                     result

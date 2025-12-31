@@ -146,7 +146,7 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   setVoiceMode: (voiceMode) => set({ voiceMode }),
 
-  clearMessages: () => set({ messages: [], conversationId: null, streamingText: "", streamingThinking: "" }),
+  clearMessages: () => set({ messages: [], conversationId: null, streamingText: "", streamingThinking: "", voiceMode: false }),
 
   setMessages: (messages) => set({ messages }),
 

@@ -128,11 +128,17 @@ function attachListeners() {
     }
   });
 
+  const unlistenVoiceModePromise = listen<boolean>("agent:voice_mode", (event) => {
+    console.log("[voice] Voice mode restored:", event.payload);
+    store().setVoiceMode(event.payload);
+  });
+
   unlistenPromises = [
     unlistenPromise,
     unlistenStreamPromise,
     unlistenConvIdPromise,
     unlistenSpeakPromise,
+    unlistenVoiceModePromise,
   ];
 }
 

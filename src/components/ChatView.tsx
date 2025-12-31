@@ -727,7 +727,7 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
 
 interface HistoryDropdownProps {
   onNewChat: () => void;
-  onLoad: (messages: ChatMessage[], model: ModelId, mode: AgentMode, conversationId: string) => void;
+  onLoad: (messages: ChatMessage[], model: ModelId, mode: AgentMode, conversationId: string, voiceMode: boolean) => void;
   disabled?: boolean;
 }
 
@@ -770,7 +770,7 @@ function HistoryDropdown({ onNewChat, onLoad, disabled }: HistoryDropdownProps) 
         const chatMessages = convertApiToChat(conv);
         const model = conv.model as ModelId;
         const mode = conv.mode as AgentMode;
-        onLoad(chatMessages, model, mode, conv.id);
+        onLoad(chatMessages, model, mode, conv.id, conv.voice_mode ?? false);
       }
     } catch (e) {
       console.error("Failed to load conversation:", e);
@@ -1127,11 +1127,12 @@ export default function ChatView({ variant }: ChatViewProps) {
             <>
               <HistoryDropdown
                 onNewChat={() => clearMessages()}
-                onLoad={(msgs, model, mode, conversationId) => {
+                onLoad={(msgs, model, mode, conversationId, voiceMode) => {
                   setMessages(msgs);
                   setSelectedModel(model);
                   setSelectedMode(mode);
                   setConversationId(conversationId);
+                  setVoiceMode(voiceMode);
                 }}
                 disabled={isRunning}
               />

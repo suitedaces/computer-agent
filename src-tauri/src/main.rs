@@ -449,6 +449,11 @@ mod storage_cmd {
     pub fn search_conversations(query: String, limit: usize) -> Result<Vec<ConversationMeta>, String> {
         storage::search_conversations(&query, limit)
     }
+
+    #[tauri::command(rename_all = "camelCase")]
+    pub fn set_conversation_voice_mode(conversation_id: String, voice_mode: bool) -> Result<(), String> {
+        storage::set_conversation_voice_mode(&conversation_id, voice_mode)
+    }
 }
 
 // --- voice IPC commands ---
@@ -1039,6 +1044,7 @@ fn main() {
             storage_cmd::save_conversation,
             storage_cmd::delete_conversation,
             storage_cmd::search_conversations,
+            storage_cmd::set_conversation_voice_mode,
             voice_cmd::start_voice,
             voice_cmd::stop_voice,
             voice_cmd::is_voice_running,
