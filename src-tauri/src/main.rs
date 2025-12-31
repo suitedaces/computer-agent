@@ -11,6 +11,7 @@ mod bash;
 mod browser;
 mod computer;
 mod panels;
+mod permissions;
 mod storage;
 mod voice;
 
@@ -999,6 +1000,16 @@ fn main() {
             voice_cmd::start_ptt,
             voice_cmd::stop_ptt,
             voice_cmd::is_ptt_running,
+            permissions::check_permissions,
+            permissions::request_permission,
+            permissions::open_permission_settings,
+            permissions::get_browser_profile_status,
+            permissions::open_browser_profile,
+            permissions::open_browser_profile_url,
+            permissions::clear_domain_cookies,
+            permissions::reset_browser_profile,
+            permissions::get_api_key_status,
+            permissions::save_api_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

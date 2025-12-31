@@ -14,6 +14,7 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
   Brain,
   Clock,
   X,
@@ -36,7 +37,9 @@ import {
   GripHorizontal,
   Mic,
   MicOff,
+  Settings,
 } from "lucide-react";
+import SettingsContent from "./SettingsContent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -866,6 +869,9 @@ export default function ChatView({ variant }: ChatViewProps) {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState("");
 
+  // settings panel state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const isSpotlight = variant === "spotlight";
   const isMini = variant === "mini";
   const panelClass = isMini ? "mini-panel" : isSpotlight ? "spotlight-panel" : "app-panel";
@@ -998,141 +1004,190 @@ export default function ChatView({ variant }: ChatViewProps) {
       {/* titlebar - hidden for mini */}
       {!isMini && (
         <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
-          <HistoryDropdown
-              onNewChat={() => clearMessages()}
-              onLoad={(msgs, model, mode) => {
-                setMessages(msgs);
-                setSelectedModel(model);
-                setSelectedMode(mode);
-              }}
-              disabled={isRunning}
-            />
-          <div className="flex items-center gap-2">
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value as ModelId)}
-              disabled={isRunning}
-              className="glass-select"
-            >
-              {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={handleToggleView}
-              className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
-              title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
-            >
-              {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-            <button
-              onClick={() => {
-                if (isSpotlight) invoke("hide_spotlight_window");
-                invoke("minimize_to_mini");
-              }}
-              className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            title="Collapse"
-          >
-            <X size={16} />
-            </button>
-          </div>
+          {settingsOpen ? (
+            <>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="flex items-center gap-1.5 text-[13px] text-white/70 hover:text-white/90 transition-colors"
+              >
+                <ChevronLeft size={16} />
+                <span>Settings</span>
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleToggleView}
+                  className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+                  title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
+                >
+                  {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
+                <button
+                  onClick={() => {
+                    if (isSpotlight) invoke("hide_spotlight_window");
+                    invoke("minimize_to_mini");
+                  }}
+                  className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title="Collapse"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <HistoryDropdown
+                onNewChat={() => clearMessages()}
+                onLoad={(msgs, model, mode) => {
+                  setMessages(msgs);
+                  setSelectedModel(model);
+                  setSelectedMode(mode);
+                }}
+                disabled={isRunning}
+              />
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value as ModelId)}
+                  disabled={isRunning}
+                  className="glass-select"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+                  title="Settings"
+                >
+                  <Settings size={14} />
+                </button>
+                <button
+                  onClick={handleToggleView}
+                  className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+                  title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
+                >
+                  {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
+                <button
+                  onClick={() => {
+                    if (isSpotlight) invoke("hide_spotlight_window");
+                    invoke("minimize_to_mini");
+                  }}
+                  className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title="Collapse"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* messages */}
-      <div ref={scrollRef} className={`flex-1 overflow-y-auto ${padding}`}>
-        <div className={messages.length === 0 && !streamingText && !streamingThinking ? "h-full" : "space-y-2"}>
-          <AnimatePresence mode="popLayout">
-            {messages.length === 0 && !streamingText && !streamingThinking ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex flex-col items-center justify-center h-full text-white/25"
-              >
-                <img src="/vaporlofi.gif" alt="" className={`${gifSize} h-auto opacity-60`} />
-                <p className="text-sm mt-4 text-white/50">sip coffee while ai takes over your computer</p>
-              </motion.div>
-            ) : (
-              <>
-                {messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)}
-                <ThinkingBubble />
-                <StreamingBubble />
-                <div ref={bottomRef} />
-              </>
-            )}
-          </AnimatePresence>
+      {/* content area - settings or chat */}
+      {settingsOpen ? (
+        <div className={`flex-1 overflow-y-auto ${padding}`}>
+          <SettingsContent />
         </div>
-      </div>
+      ) : (
+        <>
+          {/* messages */}
+          <div ref={scrollRef} className={`flex-1 overflow-y-auto ${padding}`}>
+            <div className={messages.length === 0 && !streamingText && !streamingThinking ? "h-full" : "space-y-2"}>
+              <AnimatePresence mode="popLayout">
+                {messages.length === 0 && !streamingText && !streamingThinking ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex flex-col items-center justify-center h-full text-white/25"
+                  >
+                    <img src="/vaporlofi.gif" alt="" className={`${gifSize} h-auto opacity-60`} />
+                    <p className="text-sm mt-4 text-white/50">sip coffee while ai takes over your computer</p>
+                  </motion.div>
+                ) : (
+                  <>
+                    {messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)}
+                    <ThinkingBubble />
+                    <StreamingBubble />
+                    <div ref={bottomRef} />
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
 
-      {/* input or stop hint */}
-      <div className={`${inputPadding} shrink-0`}>
-        {isRunning ? (
-          <div className="glass-card flex items-center justify-center gap-2 p-3 text-red-300/70">
-            <Square size={14} />
-            <span className="text-[12px]">⌘⇧S to stop</span>
+          {/* input or stop hint */}
+          <div className={`${inputPadding} shrink-0`}>
+            {isRunning ? (
+              <div className="glass-card flex items-center justify-center gap-2 p-3 text-red-300/70">
+                <Square size={14} />
+                <span className="text-[12px]">⌘⇧S to stop</span>
+              </div>
+            ) : (
+              <div className="glass-card flex items-center gap-2 p-2">
+                <motion.button
+                  onClick={toggleVoice}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                    isVoiceActive
+                      ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
+                      : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+                  }`}
+                  title={isVoiceActive ? "Stop recording" : "Start voice input"}
+                >
+                  {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
+                </motion.button>
+                <textarea
+                  ref={inputRef}
+                  value={inputText + (voiceText ? (inputText ? " " : "") + voiceText : "")}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={isVoiceActive ? "listening..." : "what should I do?"}
+                  rows={1}
+                  className={`flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden ${isVoiceActive ? "italic" : ""}`}
+                  style={{ height: "24px" }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = "24px";
+                    target.style.height = Math.min(target.scrollHeight, 100) + "px";
+                  }}
+                />
+                <motion.button
+                  onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className={`shrink-0 h-8 px-2 rounded-xl flex items-center gap-1.5 transition-colors ${
+                    selectedMode === "computer"
+                      ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
+                      : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+                  }`}
+                  title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
+                >
+                  <MousePointerClick size={12} />
+                  <span className="text-[9px]">Computer</span>
+                </motion.button>
+                <motion.button
+                  onClick={() => submit()}
+                  disabled={!inputText.trim()}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                    inputText.trim()
+                      ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
+                      : "bg-white/5 border border-white/10 text-white/20"
+                  }`}
+                >
+                  <Send size={14} />
+                </motion.button>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="glass-card flex items-center gap-2 p-2">
-            <motion.button
-              onClick={toggleVoice}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
-                isVoiceActive
-                  ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
-                  : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
-              }`}
-              title={isVoiceActive ? "Stop recording" : "Start voice input"}
-            >
-              {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
-            </motion.button>
-            <textarea
-              ref={inputRef}
-              value={inputText + (voiceText ? (inputText ? " " : "") + voiceText : "")}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={isVoiceActive ? "listening..." : "what should I do?"}
-              rows={1}
-              className={`flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden ${isVoiceActive ? "italic" : ""}`}
-              style={{ height: "24px" }}
-              onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = "24px";
-                target.style.height = Math.min(target.scrollHeight, 100) + "px";
-              }}
-            />
-            <motion.button
-              onClick={() => setSelectedMode(selectedMode === "computer" ? "browser" : "computer")}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className={`shrink-0 h-8 px-2 rounded-xl flex items-center gap-1.5 transition-colors ${
-                selectedMode === "computer"
-                  ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
-                  : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
-              }`}
-              title={selectedMode === "computer" ? "Computer control active" : "Enable computer control"}
-            >
-              <MousePointerClick size={12} />
-              <span className="text-[9px]">Computer</span>
-            </motion.button>
-            <motion.button
-              onClick={() => submit()}
-              disabled={!inputText.trim()}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
-                inputText.trim()
-                  ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
-                  : "bg-white/5 border border-white/10 text-white/20"
-              }`}
-            >
-              <Send size={14} />
-            </motion.button>
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </motion.div>
   );
 }
