@@ -4,6 +4,7 @@ import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
 import { queueAudio } from "../utils/audio";
+import { formatToolMessage, ToolInput } from "../utils/toolFormat";
 
 type UnlistenFn = () => void;
 
@@ -29,7 +30,7 @@ function attachListeners() {
     .catch(() => store().setApiKeySet(false));
 
   const unlistenPromise = listen<AgentUpdate>("agent-update", (event) => {
-    const { update_type, message, action, screenshot, exit_code, mode } = event.payload;
+    const { update_type, message, tool_name, tool_input, screenshot, exit_code, mode } = event.payload;
     const s = store();
 
     switch (update_type) {
@@ -57,19 +58,16 @@ function attachListeners() {
         s.addMessage({ role: "assistant", content: message, type: "info" });
         break;
 
-      case "action":
-        if (message.startsWith("$ ")) {
+      case "tool":
+        // centralized tool formatting
+        if (tool_name && tool_input) {
+          const formatted = formatToolMessage(tool_name, tool_input as ToolInput, { pending: true });
           s.addMessage({
             role: "assistant",
-            content: message.slice(2),
-            type: "bash",
-          });
-        } else {
-          s.addMessage({
-            role: "assistant",
-            content: message,
-            type: "action",
-            action: action,
+            content: formatted.content,
+            type: formatted.type,
+            action: formatted.action,
+            pending: true,
           });
         }
         break;

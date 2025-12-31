@@ -1,7 +1,9 @@
 export interface AgentUpdate {
-  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result" | "user_message" | "browser_result";
+  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result" | "user_message" | "browser_result" | "tool";
   message: string;
-  action?: ComputerAction;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  action?: ComputerAction; // deprecated, use tool_input
   screenshot?: string;
   bash_command?: string;
   exit_code?: number;

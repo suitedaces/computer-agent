@@ -46,6 +46,7 @@ import SettingsContent from "./SettingsContent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createAudioElement } from "../utils/audio";
+import { formatToolMessage, ToolInput, stripVoiceInputTags } from "../utils/toolFormat";
 
 // url pill component showing domain and path
 function UrlLink({ url }: { url: string }) {
@@ -68,138 +69,6 @@ function UrlLink({ url }: { url: string }) {
     </span>
   );
 }
-
-// format action for display (past tense for loaded history)
-// stores url in format "action||url" when url is present for later rendering
-function formatActionForHistory(name: string, input: Record<string, unknown>): string {
-  // computer tool actions
-  if (name === "computer") {
-    const action = input.action as string;
-    const coord = input.coordinate as [number, number] | undefined;
-    const text = input.text as string | undefined;
-
-    switch (action) {
-      case "screenshot":
-        return "Took screenshot";
-      case "mouse_move":
-        return coord ? `Moved mouse to (${coord[0]}, ${coord[1]})` : "Moved mouse";
-      case "left_click":
-        return coord ? `Clicked at (${coord[0]}, ${coord[1]})` : "Left clicked";
-      case "right_click":
-        return "Right clicked";
-      case "double_click":
-        return coord ? `Double clicked at (${coord[0]}, ${coord[1]})` : "Double clicked";
-      case "type":
-        if (text) {
-          const preview = text.length > 30 ? `${text.slice(0, 30)}...` : text;
-          return `Typed: "${preview}"`;
-        }
-        return "Typed text";
-      case "key":
-        return text ? `Pressed key: ${text}` : "Pressed key";
-      case "scroll": {
-        const dir = input.scroll_direction as string || "down";
-        return `Scrolled ${dir}`;
-      }
-      case "wait":
-        return "Waited";
-      default:
-        return action;
-    }
-  }
-
-  // browser tool actions
-  switch (name) {
-    case "take_snapshot":
-      return "Took snapshot";
-    case "click": {
-      const dbl = input.dblClick as boolean;
-      return dbl ? "Double clicked" : "Clicked";
-    }
-    case "hover":
-      return "Hovered";
-    case "fill": {
-      const val = input.value as string | undefined;
-      if (val) {
-        const preview = val.length > 20 ? `${val.slice(0, 20)}...` : val;
-        return `Filled: "${preview}"`;
-      }
-      return "Filled field";
-    }
-    case "press_key": {
-      const key = input.key as string | undefined;
-      return key ? `Pressed ${key}` : "Pressed key";
-    }
-    case "navigate_page": {
-      const type = input.type as string | undefined;
-      switch (type) {
-        case "goto": {
-          const url = input.url as string | undefined;
-          if (url) {
-            return `Navigated to ||${url}||`;
-          }
-          return "Navigated";
-        }
-        case "back":
-          return "Went back";
-        case "forward":
-          return "Went forward";
-        case "reload":
-          return "Reloaded page";
-        default:
-          return "Navigated";
-      }
-    }
-    case "wait_for": {
-      const text = input.text as string | undefined;
-      if (text) {
-        const preview = text.length > 20 ? `${text.slice(0, 20)}...` : text;
-        return `Waited for "${preview}"`;
-      }
-      return "Waited";
-    }
-    case "new_page": {
-      const url = input.url as string | undefined;
-      if (url) {
-        return `Opened new tab ||${url}||`;
-      }
-      return "Opened new tab";
-    }
-    case "list_pages":
-      return "Listed tabs";
-    case "select_page": {
-      const idx = input.pageIdx as number | undefined;
-      return idx !== undefined ? `Switched to tab ${idx}` : "Switched tab";
-    }
-    case "close_page": {
-      const idx = input.pageIdx as number | undefined;
-      return idx !== undefined ? `Closed tab ${idx}` : "Closed tab";
-    }
-    case "drag":
-      return "Dragged";
-    case "fill_form":
-      return "Filled form";
-    case "handle_dialog": {
-      const action = input.action as string | undefined;
-      switch (action) {
-        case "accept":
-          return "Accepted dialog";
-        case "dismiss":
-          return "Dismissed dialog";
-        default:
-          return "Handled dialog";
-      }
-    }
-    case "screenshot":
-      return "Took screenshot";
-    case "upload_file":
-      return "Uploaded file";
-    default:
-      // fallback: convert snake_case to readable
-      return name.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-  }
-}
-
 interface ChatViewProps {
   variant: "sidebar" | "spotlight" | "mini";
 }
@@ -655,7 +524,7 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
       chatMessages.push({
         id: crypto.randomUUID(),
         role: "user",
-        content: mainText,
+        content: stripVoiceInputTags(mainText),
         timestamp: new Date(conversation.updated_at * 1000),
         screenshot,
       });
@@ -678,45 +547,22 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
             timestamp: new Date(conversation.updated_at * 1000),
           });
         } else if (block.type === "tool_use" && block.name) {
-          const input = block.input as Record<string, unknown> | undefined;
+          const input = (block.input as ToolInput) || {};
           const toolUseId = block.id;
+          const idx = chatMessages.length;
 
-          if (block.name === "bash" && input?.command) {
-            const idx = chatMessages.length;
-            chatMessages.push({
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: String(input.command),
-              timestamp: new Date(conversation.updated_at * 1000),
-              type: "bash",
-              pending: false,
-            });
-            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
-          } else if (block.name === "computer" && input?.action) {
-            const idx = chatMessages.length;
-            chatMessages.push({
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: formatActionForHistory("computer", input),
-              timestamp: new Date(conversation.updated_at * 1000),
-              type: "action",
-              action: input as unknown as ChatMessage["action"],
-              pending: false,
-            });
-            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
-          } else {
-            // browser tools - show as action
-            const idx = chatMessages.length;
-            chatMessages.push({
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: formatActionForHistory(block.name, input || {}),
-              timestamp: new Date(conversation.updated_at * 1000),
-              type: "action",
-              pending: false,
-            });
-            if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
-          }
+          // centralized tool formatting (pending: false = past tense for history)
+          const formatted = formatToolMessage(block.name, input, { pending: false });
+          chatMessages.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: formatted.content,
+            timestamp: new Date(conversation.updated_at * 1000),
+            type: formatted.type,
+            action: formatted.action,
+            pending: false,
+          });
+          if (toolUseId) toolUseIdToIndex.set(toolUseId, idx);
         }
       }
     }

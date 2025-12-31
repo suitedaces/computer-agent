@@ -42,7 +42,11 @@ pub struct AgentUpdate {
     pub update_type: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub action: Option<serde_json::Value>,
+    pub tool_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_input: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<serde_json::Value>, // deprecated, use tool_input
     #[serde(skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -250,6 +254,8 @@ impl Agent {
         let _ = app_handle.emit("agent-update", AgentUpdate {
             update_type: "user_message".to_string(),
             message: instructions.clone(),
+            tool_name: None,
+            tool_input: None,
             action: None,
             screenshot: context_screenshot.clone(),
             bash_command: None,
@@ -427,14 +433,8 @@ impl Agent {
                                 }
                             };
 
-                            // emit action
-                            self.emit(
-                                &app_handle,
-                                "action",
-                                &format_action(&action),
-                                Some(input.clone()),
-                                None,
-                            );
+                            // emit tool for TS-side formatting
+                            self.emit_tool(&app_handle, "computer", input.clone());
                             // emit globally for mini
                             match app_handle.emit("agent:action", serde_json::json!({
                                 "action": action.action,
@@ -544,7 +544,7 @@ impl Agent {
                             if restart {
                                 let mut bash = self.bash.lock().await;
                                 bash.restart();
-                                self.emit(&app_handle, "action", "Restarting bash session", Some(input.clone()), None);
+                                self.emit_tool(&app_handle, "bash", serde_json::json!({"restart": true}));
                                 tool_results.push(ContentBlock::ToolResult {
                                     tool_use_id: id.clone(),
                                     content: vec![ToolResultContent::Text {
@@ -552,13 +552,8 @@ impl Agent {
                                     }],
                                 });
                             } else if let Some(cmd) = command {
-                                // emit action
-                                let preview = if cmd.len() > 50 {
-                                    format!("$ {}...", &cmd[..50])
-                                } else {
-                                    format!("$ {}", cmd)
-                                };
-                                self.emit(&app_handle, "action", &preview, Some(input.clone()), None);
+                                // emit tool for TS-side formatting
+                                self.emit_tool(&app_handle, "bash", input.clone());
                                 // emit globally for mini
                                 let _ = app_handle.emit("agent:bash", serde_json::json!({ "command": cmd }));
 
@@ -588,13 +583,8 @@ impl Agent {
                         } else if is_browser_tool(name) && mode == AgentMode::Browser {
                             // handle browser tools
                             println!("[agent] Calling browser tool: {}", name);
-                            self.emit(
-                                &app_handle,
-                                "action",
-                                &format_browser_action(name, input),
-                                Some(input.clone()),
-                                None,
-                            );
+                            // emit tool for TS-side formatting
+                            self.emit_tool(&app_handle, name, input.clone());
                             let _ = app_handle.emit("agent:browser_tool", serde_json::json!({ "name": name }));
 
                             let mut browser_guard = self.browser_client.lock().await;
@@ -820,6 +810,8 @@ impl Agent {
         let payload = AgentUpdate {
             update_type: update_type.to_string(),
             message: message.to_string(),
+            tool_name: None,
+            tool_input: None,
             action,
             screenshot,
             bash_command: None,
@@ -832,95 +824,29 @@ impl Agent {
             Err(e) => println!("[agent] Emit FAILED: {} - {:?}", update_type, e),
         }
     }
-}
 
-fn format_action(action: &ComputerAction) -> String {
-    match action.action.as_str() {
-        "screenshot" => "Taking screenshot".to_string(),
-        "mouse_move" => {
-            if let Some(coord) = action.coordinate {
-                format!("Moving mouse to ({}, {})", coord[0], coord[1])
-            } else {
-                "Moving mouse".to_string()
-            }
+    // emit tool action with tool name and input for TS-side formatting
+    fn emit_tool(
+        &self,
+        app_handle: &AppHandle,
+        tool_name: &str,
+        tool_input: serde_json::Value,
+    ) {
+        let payload = AgentUpdate {
+            update_type: "tool".to_string(),
+            message: String::new(),
+            tool_name: Some(tool_name.to_string()),
+            tool_input: Some(tool_input.clone()),
+            action: Some(tool_input), // backwards compat
+            screenshot: None,
+            bash_command: None,
+            exit_code: None,
+            mode: None,
+        };
+        match app_handle.emit("agent-update", payload) {
+            Ok(_) => println!("[agent] Emit tool: {}", tool_name),
+            Err(e) => println!("[agent] Emit tool FAILED: {} - {:?}", tool_name, e),
         }
-        "left_click" => {
-            if let Some(coord) = action.coordinate {
-                format!("Clicking at ({}, {})", coord[0], coord[1])
-            } else {
-                "Left click".to_string()
-            }
-        }
-        "right_click" => "Right click".to_string(),
-        "double_click" => {
-            if let Some(coord) = action.coordinate {
-                format!("Double clicking at ({}, {})", coord[0], coord[1])
-            } else {
-                "Double click".to_string()
-            }
-        }
-        "type" => {
-            if let Some(text) = &action.text {
-                let preview = if text.len() > 30 {
-                    format!("{}...", &text[..30])
-                } else {
-                    text.clone()
-                };
-                format!("Typing: \"{}\"", preview)
-            } else {
-                "Typing".to_string()
-            }
-        }
-        "key" => {
-            if let Some(key) = &action.text {
-                format!("Pressing key: {}", key)
-            } else {
-                "Key press".to_string()
-            }
-        }
-        "scroll" => {
-            let dir = action.scroll_direction.as_deref().unwrap_or("down");
-            format!("Scrolling {}", dir)
-        }
-        "wait" => "Waiting".to_string(),
-        "left_mouse_down" => {
-            if let Some(coord) = action.coordinate {
-                format!("Mouse down at ({}, {})", coord[0], coord[1])
-            } else {
-                "Mouse down".to_string()
-            }
-        }
-        "left_mouse_up" => {
-            if let Some(coord) = action.coordinate {
-                format!("Mouse up at ({}, {})", coord[0], coord[1])
-            } else {
-                "Mouse up".to_string()
-            }
-        }
-        "hold_key" => {
-            if let Some(key) = &action.key {
-                format!("Holding key: {}", key)
-            } else {
-                "Hold key".to_string()
-            }
-        }
-        "zoom" => {
-            if let Some(region) = action.region {
-                format!("Zooming region ({}, {}) to ({}, {})", region[0], region[1], region[2], region[3])
-            } else {
-                "Zooming".to_string()
-            }
-        }
-        "middle_click" => "Middle click".to_string(),
-        "triple_click" => "Triple click".to_string(),
-        "left_click_drag" => {
-            if let (Some(start), Some(end)) = (&action.start_coordinate, &action.coordinate) {
-                format!("Dragging from ({}, {}) to ({}, {})", start[0], start[1], end[0], end[1])
-            } else {
-                "Dragging".to_string()
-            }
-        }
-        _ => format!("Action: {}", action.action),
     }
 }
 
@@ -944,90 +870,6 @@ const BROWSER_TOOLS: &[&str] = &[
 
 fn is_browser_tool(name: &str) -> bool {
     BROWSER_TOOLS.contains(&name)
-}
-
-fn format_browser_action(name: &str, input: &serde_json::Value) -> String {
-    match name {
-        "take_snapshot" => "Taking snapshot".to_string(),
-        "click" => {
-            let dbl = input.get("dblClick").and_then(|v| v.as_bool()).unwrap_or(false);
-            if dbl { "Double clicking".to_string() } else { "Clicking".to_string() }
-        }
-        "hover" => "Hovering".to_string(),
-        "fill" => {
-            if let Some(val) = input.get("value").and_then(|v| v.as_str()) {
-                let preview = if val.len() > 20 { format!("{}...", &val[..20]) } else { val.to_string() };
-                format!("Filling: \"{}\"", preview)
-            } else {
-                "Filling field".to_string()
-            }
-        }
-        "press_key" => {
-            if let Some(key) = input.get("key").and_then(|v| v.as_str()) {
-                format!("Pressing {}", key)
-            } else {
-                "Pressing key".to_string()
-            }
-        }
-        "navigate_page" => {
-            match input.get("type").and_then(|v| v.as_str()) {
-                Some("goto") => {
-                    if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
-                        let preview = if url.len() > 40 { format!("{}...", &url[..40]) } else { url.to_string() };
-                        format!("Navigating to {}", preview)
-                    } else {
-                        "Navigating".to_string()
-                    }
-                }
-                Some("back") => "Going back".to_string(),
-                Some("forward") => "Going forward".to_string(),
-                Some("reload") => "Reloading page".to_string(),
-                _ => "Navigating".to_string(),
-            }
-        }
-        "wait_for" => {
-            if let Some(text) = input.get("text").and_then(|v| v.as_str()) {
-                let preview = if text.len() > 20 { format!("{}...", &text[..20]) } else { text.to_string() };
-                format!("Waiting for \"{}\"", preview)
-            } else {
-                "Waiting".to_string()
-            }
-        }
-        "new_page" => {
-            if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
-                let preview = if url.len() > 40 { format!("{}...", &url[..40]) } else { url.to_string() };
-                format!("Opening new tab: {}", preview)
-            } else {
-                "Opening new tab".to_string()
-            }
-        }
-        "list_pages" => "Listing tabs".to_string(),
-        "select_page" => {
-            if let Some(idx) = input.get("pageIdx").and_then(|v| v.as_u64()) {
-                format!("Switching to tab {}", idx)
-            } else {
-                "Switching tab".to_string()
-            }
-        }
-        "close_page" => {
-            if let Some(idx) = input.get("pageIdx").and_then(|v| v.as_u64()) {
-                format!("Closing tab {}", idx)
-            } else {
-                "Closing tab".to_string()
-            }
-        }
-        "drag" => "Dragging".to_string(),
-        "fill_form" => "Filling form".to_string(),
-        "handle_dialog" => {
-            match input.get("action").and_then(|v| v.as_str()) {
-                Some("accept") => "Accepting dialog".to_string(),
-                Some("dismiss") => "Dismissing dialog".to_string(),
-                _ => "Handling dialog".to_string(),
-            }
-        }
-        "screenshot" => "Taking screenshot".to_string(),
-        _ => format!("Browser: {}", name),
-    }
 }
 
 async fn execute_browser_tool(
