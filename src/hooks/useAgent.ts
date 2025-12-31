@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
-import { queueAudio, playClickSound, playTypeSound, playDoneSound, playScreenshotSound, startAmbientSound, stopAmbientSound, pauseAmbientSound, resumeAmbientSound } from "../utils/audio";
+import { queueAudio, playClickSound, playTypeSound, playDoneSound, playScreenshotSound, startAmbientSound, stopAmbientSound, pauseAmbientSound, resumeAmbientSound, setAudioEndCallback } from "../utils/audio";
 import { formatToolMessage, ToolInput } from "../utils/toolFormat";
 
 type UnlistenFn = () => void;
@@ -39,6 +39,12 @@ function attachListeners() {
         if (mode === "computer") {
           invoke("set_main_click_through", { ignore: true }).catch(() => {});
           invoke("show_border_overlay").catch(() => {});
+        }
+        // start ambient sound in voice mode
+        if (s.voiceMode && shouldAutoplayAudio) {
+          startAmbientSound();
+          // resume ambient after TTS finishes
+          setAudioEndCallback(() => resumeAmbientSound());
         }
         break;
 
@@ -103,6 +109,9 @@ function attachListeners() {
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
+        // clear callback first, then stop ambient
+        setAudioEndCallback(null);
+        stopAmbientSound();
         // play completion chime (skip in voice mode - TTS is the feedback)
         if (shouldAutoplayAudio && !s.voiceMode) {
           playDoneSound();
@@ -113,6 +122,8 @@ function attachListeners() {
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
+        setAudioEndCallback(null);
+        stopAmbientSound();
         s.addMessage({ role: "assistant", content: message, type: "error" });
         break;
 
@@ -145,6 +156,8 @@ function attachListeners() {
     console.log("[voice] Speaking:", text.slice(0, 50) + "...");
     store().addMessage({ role: "assistant", content: text, type: "speak", audioData: audio });
     if (shouldAutoplayAudio) {
+      // pause ambient while speaking
+      pauseAmbientSound();
       queueAudio(audio);
     }
   });

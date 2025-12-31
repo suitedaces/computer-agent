@@ -14,46 +14,71 @@ function getAudioContext(): AudioContext {
   return audioContext;
 }
 
-// subtle click sound
+// iOS-style subtle pop/click - two layered tones for depth
 export function playClickSound() {
   try {
     const ctx = getAudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+    // layer 1: soft pop (higher freq, quick)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(1800, ctx.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.03);
+    gain1.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.04);
 
-    osc.frequency.setValueAtTime(800, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.05);
-
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.05);
+    // layer 2: body (lower, adds warmth)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(600, ctx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.025);
+    gain2.gain.setValueAtTime(0.04, ctx.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+    osc2.start(ctx.currentTime);
+    osc2.stop(ctx.currentTime + 0.03);
   } catch (e) {
     console.error("[audio] click error:", e);
   }
 }
 
-// subtle typing sound
+// iOS keyboard-style soft tick
 export function playTypeSound() {
-  const ctx = getAudioContext();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
+  try {
+    const ctx = getAudioContext();
 
-  osc.connect(gain);
-  gain.connect(ctx.destination);
+    // soft high tick with slight randomness
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
 
-  osc.type = "square";
-  osc.frequency.setValueAtTime(1200 + Math.random() * 400, ctx.currentTime);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
 
-  gain.gain.setValueAtTime(0.03, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(3000, ctx.currentTime);
 
-  osc.start(ctx.currentTime);
-  osc.stop(ctx.currentTime + 0.03);
+    osc.type = "sine";
+    const baseFreq = 2200 + Math.random() * 200;
+    osc.frequency.setValueAtTime(baseFreq, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.7, ctx.currentTime + 0.02);
+
+    gain.gain.setValueAtTime(0.035, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.025);
+
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.025);
+  } catch (e) {
+    console.error("[audio] type error:", e);
+  }
 }
 
 // soft completion chime
@@ -123,7 +148,7 @@ export function stopAmbientSound() {
     clearInterval(ambientInterval);
     ambientInterval = null;
   }
-  ambientPaused = false;
+  ambientPaused = true; // prevent any pending plays
 }
 
 export function pauseAmbientSound() {
@@ -131,44 +156,51 @@ export function pauseAmbientSound() {
 }
 
 export function resumeAmbientSound() {
-  ambientPaused = false;
+  // only resume if ambient is still active
+  if (ambientInterval) {
+    ambientPaused = false;
+  }
 }
 
-// camera shutter sound for screenshots
+// iOS-style camera shutter - crisp snap with tonal body
 export function playScreenshotSound() {
   try {
     const ctx = getAudioContext();
 
-    // short burst of white noise for shutter effect
-    const bufferSize = ctx.sampleRate * 0.08;
+    // layer 1: crisp noise snap
+    const bufferSize = ctx.sampleRate * 0.05;
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
-
     for (let i = 0; i < bufferSize; i++) {
-      // noise with quick decay
-      const decay = 1 - i / bufferSize;
-      data[i] = (Math.random() * 2 - 1) * decay * decay;
+      const decay = Math.pow(1 - i / bufferSize, 3);
+      data[i] = (Math.random() * 2 - 1) * decay;
     }
-
     const noise = ctx.createBufferSource();
     noise.buffer = buffer;
-
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    filter.type = "bandpass";
-    filter.frequency.setValueAtTime(2000, ctx.currentTime);
-    filter.Q.setValueAtTime(1, ctx.currentTime);
-
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-
-    gain.gain.setValueAtTime(0.06, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
-
+    const noiseGain = ctx.createGain();
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = "highpass";
+    noiseFilter.frequency.setValueAtTime(2500, ctx.currentTime);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noiseGain.gain.setValueAtTime(0.05, ctx.currentTime);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
     noise.start();
-    noise.stop(ctx.currentTime + 0.08);
+    noise.stop(ctx.currentTime + 0.05);
+
+    // layer 2: tonal "click" body
+    const osc = ctx.createOscillator();
+    const oscGain = ctx.createGain();
+    osc.connect(oscGain);
+    oscGain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1400, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.04);
+    oscGain.gain.setValueAtTime(0.05, ctx.currentTime);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.05);
   } catch (e) {
     console.error("[audio] screenshot error:", e);
   }
@@ -177,6 +209,7 @@ export function playScreenshotSound() {
 let currentAudio: HTMLAudioElement | null = null;
 const audioQueue: string[] = [];
 let isPlaying = false;
+let onAudioEndCallback: (() => void) | null = null;
 
 function base64ToBlob(base64: string): Blob {
   const binaryString = atob(base64);
@@ -214,6 +247,12 @@ async function playNext() {
 
   currentAudio = null;
   isPlaying = false;
+
+  // if queue empty, call end callback (resume ambient)
+  if (audioQueue.length === 0 && onAudioEndCallback) {
+    onAudioEndCallback();
+  }
+
   playNext();
 }
 
@@ -236,6 +275,11 @@ export function stopAudio() {
 // check if currently playing
 export function isAudioPlaying(): boolean {
   return isPlaying;
+}
+
+// set callback for when audio queue empties
+export function setAudioEndCallback(callback: (() => void) | null) {
+  onAudioEndCallback = callback;
 }
 
 // create replayable audio element
