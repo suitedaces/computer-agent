@@ -871,7 +871,7 @@ function StreamingBubble() {
 }
 
 export default function ChatView({ variant }: ChatViewProps) {
-  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages, setVoiceMode } = useAgentStore();
   const { submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -880,6 +880,7 @@ export default function ChatView({ variant }: ChatViewProps) {
   // voice state
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState("");
+  const [usedVoiceInput, setUsedVoiceInput] = useState(false);
 
   // settings panel state
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -903,6 +904,7 @@ export default function ChatView({ variant }: ChatViewProps) {
         const current = inputTextRef.current;
         setInputText(current ? current + " " + text : text);
         setVoiceText("");
+        setUsedVoiceInput(true); // mark that voice was used for this input
       } else {
         setVoiceText(text);
       }
@@ -984,12 +986,20 @@ export default function ChatView({ variant }: ChatViewProps) {
     });
   }, [voiceText, inputText]);
 
+  const handleSubmit = () => {
+    if (!inputText.trim()) return;
+    // enable TTS response if voice input was used
+    if (usedVoiceInput) {
+      setVoiceMode(true);
+      setUsedVoiceInput(false);
+    }
+    submit();
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (inputText.trim()) {
-        submit();
-      }
+      handleSubmit();
     }
     if (e.key === "Escape" && isSpotlight) {
       invoke("hide_spotlight_window").catch(() => {});
@@ -1183,7 +1193,7 @@ export default function ChatView({ variant }: ChatViewProps) {
                   <span className="text-[9px]">Computer</span>
                 </motion.button>
                 <motion.button
-                  onClick={() => submit()}
+                  onClick={handleSubmit}
                   disabled={!inputText.trim()}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}

@@ -6,10 +6,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, Send, X } from "lucide-react";
 import ChatView from "./components/ChatView";
 import { useAgent } from "./hooks/useAgent";
+import { useAgentStore } from "./stores/agentStore";
 import VoiceOrb from "./components/VoiceOrb";
 
 export default function MiniWindow() {
   const { submit } = useAgent();
+  const setVoiceMode = useAgentStore((s) => s.setVoiceMode);
   const [isRunning, setIsRunning] = useState(false);
   const [helpMode, setHelpMode] = useState(false);
   const [helpPrompt, setHelpPrompt] = useState("");
@@ -102,6 +104,8 @@ export default function MiniWindow() {
       try {
         await invoke("show_spotlight_window");
         await new Promise((r) => setTimeout(r, 150));
+        // enable voice mode for TTS response when using voice input
+        setVoiceMode(true);
         // pass mode override if not "current" (which means use UI selection)
         const modeOverride = mode && mode !== "current" ? mode : undefined;
         await submit(text, screenshot ?? undefined, modeOverride);

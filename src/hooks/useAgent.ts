@@ -59,12 +59,12 @@ export function useAgent() {
       switch (update_type) {
         case "started":
           setIsRunning(true);
-          // make all windows click-through while agent runs
-          invoke("set_main_click_through", { ignore: true }).catch(() => {});
-          invoke("set_mini_click_through", { ignore: true }).catch(() => {});
-          invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
-          // only show border overlay in computer mode
+          // click-through + border overlay only needed in computer mode (mouse clicks on screen)
+          // browser mode uses CDP - no need to click through
           if (mode === "computer") {
+            invoke("set_main_click_through", { ignore: true }).catch(() => {});
+            invoke("set_mini_click_through", { ignore: true }).catch(() => {});
+            invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
             invoke("show_border_overlay").catch(() => {});
           }
           break;
