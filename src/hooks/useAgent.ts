@@ -181,7 +181,7 @@ export function useAgent() {
 
     // build history from past messages (user + assistant responses)
     const history = messages
-      .filter(m => m.role === "user" || (m.role === "assistant" && (m.type === "thinking" || m.type === "info")))
+      .filter(m => m.role === "user" || (m.role === "assistant" && (m.type === "thinking" || m.type === "info" || m.type === "speak")))
       .map(m => ({ role: m.role, content: m.content }));
 
     // clear input before invoking (user message comes from backend via user_message event)

@@ -305,9 +305,14 @@ impl BrowserClient {
         match nav_type {
             "url" => {
                 let url = url.ok_or_else(|| anyhow!("url required for type=url"))?;
-                page.execute(NavigateParams::builder().url(url).build().unwrap())
-                    .await?;
-                Ok(format!("Successfully navigated to {url}"))
+                // don't wait for full page load - heavy sites timeout
+                // agent can take_snapshot to verify when ready
+                let nav_future = page.execute(NavigateParams::builder().url(url).build().unwrap());
+                match tokio::time::timeout(std::time::Duration::from_secs(5), nav_future).await {
+                    Ok(Ok(_)) => Ok(format!("Navigated to {url}")),
+                    Ok(Err(e)) => Err(anyhow!("Navigation failed: {e}")),
+                    Err(_) => Ok(format!("Navigating to {url} (page still loading, use take_snapshot to check)")),
+                }
             }
             "back" => {
                 // use js history.back()

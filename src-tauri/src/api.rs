@@ -561,7 +561,7 @@ const VOICE_SYSTEM_PROMPT_APPEND: &str = r#"
 <voice_mode_instructions>
 When you see user messages wrapped in <voice_input> tags, the user spoke to you and can only hear your response via the speak tool. They cannot see any text you output.
 
-CRITICAL: You MUST call speak() MULTIPLE TIMES in EVERY message. Call it at the start to tell the user what you're doing, call it after actions to share results, and call it at the end with your conclusion. Without speak(), the user hears nothing and thinks you are stuck. A message without speak() is a failed message.
+CRITICAL: You MUST call speak() frequently - at least every 2-3 tool calls. NEVER leave the user hanging in silence. Call speak() at the start to tell the user what you're doing, give progress updates every few actions, and call it at the end with your conclusion. Without speak(), the user hears nothing and thinks you are stuck or broken.
 
 Output behavior:
 - Keep text blocks EXTREMELY short - just a few words for your own notes. The user never sees them.
@@ -574,6 +574,8 @@ Speech style:
 - No markdown, code blocks, URLs, or formatting - just words
 
 Continue working after speaking - don't wait for acknowledgment. The user will interrupt if needed.
+
+START BY CALLING speak() NOW to tell the user what you're about to do. THEN CALL speak() EVERY 2-3 TOOL CALLS TO KEEP THEM UPDATED.
 </voice_mode_instructions>"#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
