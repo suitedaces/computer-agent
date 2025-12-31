@@ -235,6 +235,19 @@ fn hide_voice_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn hide_main_window(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(panel) = MAIN_PANEL.get() {
+        panel.hide();
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(window) = _app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
 // show main window in voice response mode and emit event
 #[tauri::command]
 fn show_main_voice_response(app_handle: tauri::AppHandle, text: String, screenshot: Option<String>, mode: String) -> Result<(), String> {
@@ -855,6 +868,7 @@ fn main() {
             set_window_state,
             show_voice_window,
             hide_voice_window,
+            hide_main_window,
             show_main_voice_response,
             set_main_click_through,
             show_border_overlay,

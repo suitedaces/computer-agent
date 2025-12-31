@@ -167,7 +167,7 @@ export default function MainWindow() {
     );
   }
 
-  // HELP MODE
+  // HELP MODE - screenshot + prompt (Cmd+Shift+H)
   if (state.mode === "help") {
     const handleSubmit = async () => {
       const prompt = helpPromptRef.current;
@@ -177,12 +177,18 @@ export default function MainWindow() {
       helpPromptRef.current = "";
     };
 
+    const handleCancel = () => {
+      dispatch({ type: "HELP_CANCEL" });
+      invoke("hide_main_window").catch(() => {});
+    };
+
     return (
-      <div className="h-full w-full flex items-center justify-center p-4 bg-black/40">
+      <div className="h-full w-full flex items-center justify-center p-4 bg-transparent">
         <motion.div
-          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          className="w-full max-w-[480px] bg-gradient-to-b from-zinc-900 to-black rounded-2xl border border-white/10 overflow-hidden shadow-2xl"
+          transition={{ duration: 0.15 }}
+          className="w-full max-w-[480px] bg-black/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl shadow-black/50"
         >
           {/* screenshot */}
           <div className="p-3 pb-2">
@@ -199,23 +205,26 @@ export default function MainWindow() {
               type="text"
               autoFocus
               onChange={(e) => (helpPromptRef.current = e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSubmit();
+                if (e.key === "Escape") handleCancel();
+              }}
               placeholder="What do you need help with?"
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:border-white/20"
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:border-white/20"
             />
           </div>
 
           {/* buttons */}
           <div className="px-3 pb-3 flex gap-2">
             <button
-              onClick={() => dispatch({ type: "HELP_CANCEL" })}
-              className="flex-1 py-2.5 rounded-xl bg-red-500/20 border border-red-400/20 text-red-300 hover:bg-red-500/30 text-xs flex items-center justify-center gap-1.5"
+              onClick={handleCancel}
+              className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 text-xs flex items-center justify-center gap-1.5 transition-colors"
             >
               <X size={14} /> Cancel
             </button>
             <button
               onClick={handleSubmit}
-              className="flex-1 py-2.5 rounded-xl bg-blue-500/30 border border-blue-400/30 text-blue-200 hover:bg-blue-500/40 text-xs font-medium flex items-center justify-center gap-1.5"
+              className="flex-1 py-2.5 rounded-xl bg-orange-500/20 border border-orange-400/20 text-orange-200 hover:bg-orange-500/30 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
             >
               <Send size={14} /> Send
             </button>
@@ -225,7 +234,7 @@ export default function MainWindow() {
     );
   }
 
-  // SPOTLIGHT MODE - quick input centered on screen
+  // SPOTLIGHT MODE - quick input centered on screen (like macOS Spotlight)
   if (state.mode === "spotlight") {
     const handleSubmit = async () => {
       const prompt = spotlightPromptRef.current;
@@ -235,47 +244,60 @@ export default function MainWindow() {
       spotlightPromptRef.current = "";
     };
 
+    const handleCancel = () => {
+      dispatch({ type: "SPOTLIGHT_CANCEL" });
+      invoke("hide_main_window").catch(() => {});
+    };
+
     return (
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: -10 }}
+        initial={{ opacity: 0, scale: 0.96, y: -8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.15 }}
-        className="h-full w-full flex items-center px-4 bg-black/90 backdrop-blur-xl rounded-2xl border border-white/15 shadow-2xl"
+        transition={{ duration: 0.12, ease: "easeOut" }}
+        className="h-full w-full flex items-center px-5 bg-black/75 backdrop-blur-2xl rounded-2xl border border-white/20 shadow-2xl shadow-black/60"
       >
-        <img src="/windows-computer-icon.png" className="w-5 h-5 opacity-70 mr-3" alt="" />
+        <img src="/windows-computer-icon.png" className="w-5 h-5 opacity-80 mr-3" alt="" />
         <input
           type="text"
           autoFocus
           onChange={(e) => (spotlightPromptRef.current = e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") handleSubmit();
-            if (e.key === "Escape") dispatch({ type: "SPOTLIGHT_CANCEL" });
+            if (e.key === "Escape") handleCancel();
           }}
           placeholder="What would you like me to do?"
-          className="flex-1 bg-transparent text-white/90 text-base placeholder:text-white/30 focus:outline-none"
+          className="flex-1 bg-transparent text-white text-[15px] placeholder:text-white/40 focus:outline-none"
         />
-        <button
-          onClick={handleSubmit}
-          className="ml-2 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-        >
-          <Send size={16} className="text-white/70" />
-        </button>
+        <div className="flex items-center gap-2">
+          <kbd className="text-[10px] text-white/30 bg-white/5 px-1.5 py-0.5 rounded">esc</kbd>
+          <button
+            onClick={handleSubmit}
+            className="p-2 rounded-lg bg-white/10 hover:bg-white/15 transition-colors"
+          >
+            <Send size={14} className="text-white/60" />
+          </button>
+        </div>
       </motion.div>
     );
   }
 
   // VOICE RESPONSE MODE - conversational, speak text is the hero
   if (state.mode === "voiceResponse") {
+    const handleDismiss = () => {
+      dispatch({ type: "VOICE_DISMISS" });
+      setSpeakText("");
+      invoke("hide_main_window").catch(() => {});
+    };
+
     return (
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="h-full w-full flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden relative cursor-pointer select-none"
+        className="h-full w-full flex flex-col items-center justify-center bg-black/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden relative cursor-pointer select-none"
         onClick={() => dispatch({ type: "VOICE_EXPAND" })}
         onContextMenu={(e) => {
           e.preventDefault();
-          dispatch({ type: "VOICE_DISMISS" });
-          setSpeakText("");
+          handleDismiss();
         }}
       >
         {/* ambient glow - pulses when running */}
