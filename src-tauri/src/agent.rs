@@ -280,18 +280,21 @@ impl Agent {
             }
         }
 
-        // build user message content - include screenshot if provided
+        // build user message content - include screenshot if provided (computer mode only)
         let mut user_content: Vec<ContentBlock> = Vec::new();
 
         // add context screenshot first if provided (from hotkey help mode)
+        // skip in browser mode - a11y tree provides structure, screenshots are redundant
         if let Some(screenshot_data) = context_screenshot {
-            user_content.push(ContentBlock::Image {
-                source: ImageSource {
-                    source_type: "base64".to_string(),
-                    media_type: "image/jpeg".to_string(),
-                    data: screenshot_data,
-                },
-            });
+            if mode == AgentMode::Computer {
+                user_content.push(ContentBlock::Image {
+                    source: ImageSource {
+                        source_type: "base64".to_string(),
+                        media_type: "image/jpeg".to_string(),
+                        data: screenshot_data,
+                    },
+                });
+            }
         }
 
         // add text instructions - wrap in voice_input tags if voice mode

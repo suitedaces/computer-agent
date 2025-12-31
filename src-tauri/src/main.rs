@@ -612,9 +612,13 @@ fn main() {
                             ShortcutState::Pressed => {
                                 println!("[ptt] pressed - starting recording (mode: {})", mode);
 
-                                // capture screenshot first (excluding app windows)
-                                // use _sync version since shortcut handlers run on main thread
-                                let screenshot = panels::take_screenshot_excluding_app_sync().ok();
+                                // capture screenshot only for computer mode
+                                // browser mode uses a11y tree, screenshots are redundant
+                                let screenshot = if mode == "computer" {
+                                    panels::take_screenshot_excluding_app_sync().ok()
+                                } else {
+                                    None
+                                };
 
                                 // play recording start sound
                                 #[cfg(target_os = "macos")]
