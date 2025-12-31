@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bytes::{BufMut, BytesMut};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
@@ -369,6 +369,7 @@ impl VoiceSession {
 pub struct PushToTalkSession {
     is_running: Arc<AtomicBool>,
     accumulated_text: Arc<Mutex<String>>,
+    session_id: Arc<AtomicU64>,
 }
 
 impl PushToTalkSession {
@@ -376,27 +377,35 @@ impl PushToTalkSession {
         Self {
             is_running: Arc::new(AtomicBool::new(false)),
             accumulated_text: Arc::new(Mutex::new(String::new())),
+            session_id: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    pub fn current_session_id(&self) -> u64 {
+        self.session_id.load(Ordering::SeqCst)
     }
 
     pub fn is_running(&self) -> bool {
         self.is_running.load(Ordering::SeqCst)
     }
 
-    pub async fn stop(&self) -> String {
+    pub async fn stop(&self) -> (String, u64) {
+        let session_id = self.session_id.load(Ordering::SeqCst);
         self.is_running.store(false, Ordering::SeqCst);
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         let text = self.accumulated_text.lock().unwrap().clone();
         self.accumulated_text.lock().unwrap().clear();
-        text
+        (text, session_id)
     }
 
-    pub async fn start(&self, api_key: String, app_handle: AppHandle) -> Result<(), String> {
+    pub async fn start(&self, api_key: String, app_handle: AppHandle) -> Result<u64, String> {
         if self.is_running.load(Ordering::SeqCst) {
             return Err("PTT session already running".to_string());
         }
 
+        // increment session id to invalidate any stale results
+        let session_id = self.session_id.fetch_add(1, Ordering::SeqCst) + 1;
         self.accumulated_text.lock().unwrap().clear();
         self.is_running.store(true, Ordering::SeqCst);
         let is_running = self.is_running.clone();
@@ -436,7 +445,7 @@ impl PushToTalkSession {
             is_running_dg.store(false, Ordering::SeqCst);
         });
 
-        let _ = app_handle.emit("ptt:started", ());
-        Ok(())
+        let _ = app_handle.emit("ptt:started", session_id);
+        Ok(session_id)
     }
 }

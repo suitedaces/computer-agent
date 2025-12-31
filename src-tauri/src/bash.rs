@@ -157,10 +157,8 @@ impl BashOutput {
         }
 
         if self.exit_code != 0 {
-            if !result.is_empty() {
-                result.push_str("\n");
-            }
-            result.push_str(&format!("(exit code: {})", self.exit_code));
+            // prepend exit code so frontend regex can parse it
+            result = format!("exit code: {}\n{}", self.exit_code, result);
         }
 
         if result.is_empty() {

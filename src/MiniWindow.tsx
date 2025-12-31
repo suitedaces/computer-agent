@@ -76,13 +76,16 @@ export default function MiniWindow() {
     });
 
     // PTT recording state
-    const unlisten4 = listen<{ recording: boolean }>("ptt:recording", (e) => {
-      console.log("[ptt] recording:", e.payload.recording);
+    const unlisten4 = listen<{ recording: boolean; sessionId?: number }>("ptt:recording", (e) => {
+      console.log("[ptt] recording:", e.payload.recording, "session:", e.payload.sessionId);
       setPttRecording(e.payload.recording);
       if (e.payload.recording) {
         setPttInterim("");
         setPttRetryMode(false);
-        pttSessionIdRef.current += 1;
+        // use backend session id for correlation
+        if (e.payload.sessionId !== undefined) {
+          pttSessionIdRef.current = e.payload.sessionId;
+        }
         pttHandledSessionRef.current = null;
         pttPhaseRef.current = "recording";
       } else {
@@ -98,24 +101,29 @@ export default function MiniWindow() {
     });
 
     // PTT result - auto-submit or show retry
-    const unlisten6 = listen<{ text: string; screenshot: string | null; mode: string | null }>("ptt:result", async (e) => {
+    const unlisten6 = listen<{ text: string; screenshot: string | null; mode: string | null; sessionId?: number }>("ptt:result", async (e) => {
       console.log("[ptt] result:", e.payload);
       setPttRecording(false);
       setPttInterim("");
 
-      const { text, screenshot, mode } = e.payload;
-      const sessionId = pttSessionIdRef.current;
-      if (pttHandledSessionRef.current === sessionId) {
+      const { text, screenshot, mode, sessionId } = e.payload;
+      // use backend session id for correlation if available
+      const expectedSessionId = pttSessionIdRef.current;
+      if (sessionId !== undefined && sessionId !== expectedSessionId) {
+        console.log("[ptt] stale session result ignored: got", sessionId, "expected", expectedSessionId);
+        return;
+      }
+      if (pttHandledSessionRef.current === expectedSessionId) {
         console.log("[ptt] duplicate session result ignored");
         return;
       }
       const now = Date.now();
       if (pttPhaseRef.current !== "stoppedWaiting" || now - pttStoppedAtRef.current > 3000) {
-        console.log("[ptt] stale result ignored");
+        console.log("[ptt] stale result ignored (phase or timeout)");
         return;
       }
       pttPhaseRef.current = "idle";
-      pttHandledSessionRef.current = sessionId;
+      pttHandledSessionRef.current = expectedSessionId;
       const last = lastPttResultRef.current;
       if (last && last.text === text && now - last.at < 1500) {
         console.log("[ptt] duplicate result ignored");

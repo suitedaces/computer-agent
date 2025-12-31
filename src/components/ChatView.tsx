@@ -727,7 +727,7 @@ function convertApiToChat(conversation: Conversation): ChatMessage[] {
 
 interface HistoryDropdownProps {
   onNewChat: () => void;
-  onLoad: (messages: ChatMessage[], model: ModelId, mode: AgentMode) => void;
+  onLoad: (messages: ChatMessage[], model: ModelId, mode: AgentMode, conversationId: string) => void;
   disabled?: boolean;
 }
 
@@ -770,7 +770,7 @@ function HistoryDropdown({ onNewChat, onLoad, disabled }: HistoryDropdownProps) 
         const chatMessages = convertApiToChat(conv);
         const model = conv.model as ModelId;
         const mode = conv.mode as AgentMode;
-        onLoad(chatMessages, model, mode);
+        onLoad(chatMessages, model, mode, conv.id);
       }
     } catch (e) {
       console.error("Failed to load conversation:", e);
@@ -933,7 +933,7 @@ function StreamingBubble() {
 }
 
 export default function ChatView({ variant }: ChatViewProps) {
-  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages, setVoiceMode } = useAgentStore();
+  const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages, setVoiceMode, setConversationId } = useAgentStore();
   const { submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -1127,10 +1127,11 @@ export default function ChatView({ variant }: ChatViewProps) {
             <>
               <HistoryDropdown
                 onNewChat={() => clearMessages()}
-                onLoad={(msgs, model, mode) => {
+                onLoad={(msgs, model, mode, conversationId) => {
                   setMessages(msgs);
                   setSelectedModel(model);
                   setSelectedMode(mode);
+                  setConversationId(conversationId);
                 }}
                 disabled={isRunning}
               />

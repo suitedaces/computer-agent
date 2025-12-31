@@ -466,6 +466,7 @@ mod voice_cmd {
         pub session: Arc<PushToTalkSession>,
         pub screenshot: std::sync::Mutex<Option<String>>,
         pub mode: std::sync::Mutex<Option<String>>,
+        pub current_session_id: std::sync::Mutex<u64>,
     }
 
     #[tauri::command]
@@ -517,7 +518,9 @@ mod voice_cmd {
         let api_key = std::env::var("DEEPGRAM_API_KEY")
             .map_err(|_| "DEEPGRAM_API_KEY not set in .env".to_string())?;
 
-        state.session.start(api_key, app_handle).await
+        let session_id = state.session.start(api_key, app_handle).await?;
+        *state.current_session_id.lock().unwrap() = session_id;
+        Ok(())
     }
 
     #[tauri::command]
@@ -525,7 +528,7 @@ mod voice_cmd {
         state: State<'_, PttState>,
     ) -> Result<(String, Option<String>), String> {
         println!("[ptt cmd] stop_ptt called");
-        let text = state.session.stop().await;
+        let (text, _session_id) = state.session.stop().await;
         let screenshot = state.screenshot.lock().unwrap().take();
         println!("[ptt cmd] got text: '{}', screenshot: {}", text, screenshot.is_some());
         Ok((text, screenshot))
@@ -614,9 +617,6 @@ fn main() {
                                     let _ = window.show();
                                 }
 
-                                // emit event to show recording indicator
-                                let _ = app.emit("ptt:recording", serde_json::json!({ "recording": true }));
-
                                 // start PTT recording via command
                                 let app_clone = app.clone();
                                 let screenshot_clone = screenshot.clone();
@@ -637,9 +637,19 @@ fn main() {
                                         }
                                         *ptt_state.mode.lock().unwrap() = Some(mode_str);
 
-                                        if let Err(e) = ptt_state.session.start(api_key, app_clone.clone()).await {
-                                            println!("[ptt] start error: {}", e);
-                                            let _ = app_clone.emit("ptt:error", e);
+                                        match ptt_state.session.start(api_key, app_clone.clone()).await {
+                                            Ok(session_id) => {
+                                                *ptt_state.current_session_id.lock().unwrap() = session_id;
+                                                // emit recording event with session id
+                                                let _ = app_clone.emit("ptt:recording", serde_json::json!({
+                                                    "recording": true,
+                                                    "sessionId": session_id
+                                                }));
+                                            }
+                                            Err(e) => {
+                                                println!("[ptt] start error: {}", e);
+                                                let _ = app_clone.emit("ptt:error", e);
+                                            }
                                         }
                                     }
                                 });
@@ -660,9 +670,16 @@ fn main() {
                                 let app_clone = app.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Some(ptt_state) = app_clone.try_state::<voice_cmd::PttState>() {
-                                        let raw_text = ptt_state.session.stop().await;
+                                        let expected_session_id = *ptt_state.current_session_id.lock().unwrap();
+                                        let (raw_text, result_session_id) = ptt_state.session.stop().await;
                                         let screenshot = ptt_state.screenshot.lock().unwrap().take();
                                         let mode = ptt_state.mode.lock().unwrap().take();
+
+                                        // check for stale result
+                                        if result_session_id != expected_session_id {
+                                            println!("[ptt] stale result ignored: got session {} but expected {}", result_session_id, expected_session_id);
+                                            return;
+                                        }
 
                                         // rewrite transcription to clean up speech artifacts
                                         let text = if !raw_text.trim().is_empty() {
@@ -689,16 +706,20 @@ fn main() {
                                             raw_text
                                         };
 
-                                        println!("[ptt] result: text='{}', screenshot={}, mode={:?}", text, screenshot.is_some(), mode);
+                                        println!("[ptt] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
 
                                         // emit recording=false right before result so UI doesn't flash to idle bar
-                                        let _ = app_clone.emit("ptt:recording", serde_json::json!({ "recording": false }));
+                                        let _ = app_clone.emit("ptt:recording", serde_json::json!({
+                                            "recording": false,
+                                            "sessionId": result_session_id
+                                        }));
 
-                                        // emit result event with mode
+                                        // emit result event with mode and session id
                                         let _ = app_clone.emit("ptt:result", serde_json::json!({
                                             "text": text,
                                             "screenshot": screenshot,
-                                            "mode": mode
+                                            "mode": mode,
+                                            "sessionId": result_session_id
                                         }));
                                     }
                                 });
@@ -774,6 +795,7 @@ fn main() {
             session: Arc::new(voice::PushToTalkSession::new()),
             screenshot: std::sync::Mutex::new(None),
             mode: std::sync::Mutex::new(None),
+            current_session_id: std::sync::Mutex::new(0),
         })
         .setup(|app| {
             // hide from dock - menubar app only
