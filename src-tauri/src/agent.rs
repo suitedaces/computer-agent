@@ -641,13 +641,6 @@ impl Agent {
                         } else if name == "speak" {
                             // handle speak tool for voice mode
                             if let Some(text) = input.get("text").and_then(|t| t.as_str()) {
-                                let preview = if text.len() > 50 {
-                                    format!("🔊 {}...", &text[..50])
-                                } else {
-                                    format!("🔊 {}", text)
-                                };
-                                self.emit(&app_handle, "action", &preview, Some(input.clone()), None);
-
                                 if let Some(ref tts) = tts_client {
                                     match tts.synthesize(text).await {
                                         Ok(audio_base64) => {
