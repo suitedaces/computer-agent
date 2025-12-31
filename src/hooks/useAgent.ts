@@ -3,49 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
-
-// audio queue to prevent overlapping playback
-const audioQueue: string[] = [];
-let isPlaying = false;
-
-async function playNext() {
-  if (isPlaying || audioQueue.length === 0) return;
-  isPlaying = true;
-
-  const base64Audio = audioQueue.shift()!;
-  try {
-    const binaryString = atob(base64Audio);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const blob = new Blob([bytes], { type: "audio/mpeg" });
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-
-    await new Promise<void>((resolve) => {
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        resolve();
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve();
-      };
-      audio.play().catch(() => resolve());
-    });
-  } catch (e) {
-    console.error("Audio playback failed:", e);
-  }
-
-  isPlaying = false;
-  playNext(); // play next in queue
-}
-
-function queueAudio(base64Audio: string) {
-  audioQueue.push(base64Audio);
-  playNext();
-}
+import { queueAudio } from "../utils/audio";
 
 export function useAgent() {
   const {

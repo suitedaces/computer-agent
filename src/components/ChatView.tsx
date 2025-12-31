@@ -45,6 +45,7 @@ import {
 import SettingsContent from "./SettingsContent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { createAudioElement } from "../utils/audio";
 
 // url pill component showing domain and path
 function UrlLink({ url }: { url: string }) {
@@ -327,23 +328,17 @@ function SpeakBubble({ msg }: { msg: ChatMessage }) {
     if (!msg.audioData) return;
 
     if (!audioRef.current) {
-      const binaryString = atob(msg.audioData);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      const blob = new Blob([bytes], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
-      audioRef.current = new Audio(url);
+      audioRef.current = createAudioElement(msg.audioData);
       audioRef.current.onended = () => setIsPlaying(false);
     }
 
+    const audio = audioRef.current;
     if (isPlaying) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+      audio.pause();
+      audio.currentTime = 0;
       setIsPlaying(false);
     } else {
-      audioRef.current.play();
+      audio.play();
       setIsPlaying(true);
     }
   };
