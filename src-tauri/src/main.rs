@@ -479,6 +479,8 @@ fn main() {
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyQ))
                 .unwrap()
+                .with_shortcut(Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space))
+                .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyC))
                 .unwrap()
                 .with_shortcut(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyB))
@@ -656,6 +658,17 @@ fn main() {
                         trigger_screen_flash();
 
                         let _ = app.emit("hotkey-help", serde_json::json!({ "screenshot": screenshot }));
+                    }
+
+                    // Cmd+Shift+Space - spotlight mode (show centered input)
+                    if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::Space) {
+                        println!("[taskhomie] Spotlight mode triggered");
+                        let _ = app.emit("hotkey-spotlight", ());
+
+                        #[cfg(target_os = "macos")]
+                        if let Some(panel) = MAIN_PANEL.get() {
+                            panel.show();
+                        }
                     }
 
                     // Cmd+Shift+S - stop agent

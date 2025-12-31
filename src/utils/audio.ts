@@ -1,5 +1,85 @@
 // shared audio playback utility
 
+// Web Audio context for generated sounds
+let audioContext: AudioContext | null = null;
+
+function getAudioContext(): AudioContext {
+  if (!audioContext) {
+    audioContext = new AudioContext();
+  }
+  // resume if suspended (browser autoplay policy)
+  if (audioContext.state === "suspended") {
+    audioContext.resume();
+  }
+  return audioContext;
+}
+
+// subtle click sound
+export function playClickSound() {
+  try {
+    const ctx = getAudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.frequency.setValueAtTime(800, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.05);
+
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.05);
+  } catch (e) {
+    console.error("[audio] click error:", e);
+  }
+}
+
+// subtle typing sound
+export function playTypeSound() {
+  const ctx = getAudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  osc.type = "square";
+  osc.frequency.setValueAtTime(1200 + Math.random() * 400, ctx.currentTime);
+
+  gain.gain.setValueAtTime(0.03, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.03);
+}
+
+// soft completion chime
+export function playDoneSound() {
+  const ctx = getAudioContext();
+
+  [523.25, 659.25, 783.99].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+
+    const startTime = ctx.currentTime + i * 0.08;
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(0.06, startTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.3);
+
+    osc.start(startTime);
+    osc.stop(startTime + 0.3);
+  });
+}
+
 let currentAudio: HTMLAudioElement | null = null;
 const audioQueue: string[] = [];
 let isPlaying = false;

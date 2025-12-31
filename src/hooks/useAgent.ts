@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
-import { queueAudio } from "../utils/audio";
+import { queueAudio, playClickSound, playTypeSound, playDoneSound } from "../utils/audio";
 import { formatToolMessage, ToolInput } from "../utils/toolFormat";
 
 type UnlistenFn = () => void;
@@ -67,6 +67,28 @@ function attachListeners() {
             action: formatted.action,
             pending: true,
           });
+
+          // play subtle sounds for actions (computer and browser tools)
+          // skip in voice mode - TTS provides audio feedback
+          if (shouldAutoplayAudio && !s.voiceMode) {
+            const action = formatted.action?.action;
+            const content = formatted.content.toLowerCase();
+
+            // click sounds: computer clicks, browser click/hover
+            if (action?.includes("click") || action === "mouse_move" ||
+                tool_name === "click" || tool_name === "hover") {
+              playClickSound();
+            }
+            // type sounds: computer type/key, browser fill
+            else if (action === "type" || action === "key" ||
+                     tool_name === "fill" || tool_name === "fill_form" || tool_name === "press_key") {
+              playTypeSound();
+            }
+            // click sound for navigation actions
+            else if (tool_name === "navigate_page" || content.includes("navigat")) {
+              playClickSound();
+            }
+          }
         }
         break;
 
@@ -78,6 +100,10 @@ function attachListeners() {
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
+        // play completion chime (only if not in voice mode - TTS provides feedback)
+        if (shouldAutoplayAudio && !s.voiceMode) {
+          playDoneSound();
+        }
         break;
 
       case "error":

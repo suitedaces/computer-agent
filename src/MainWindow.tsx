@@ -2,10 +2,9 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import ChatView from "./components/ChatView";
-import MessagesDisplay from "./components/MessagesDisplay";
 import { useAgent } from "./hooks/useAgent";
 import { useAgentStore } from "./stores/agentStore";
-import { ChevronRight, X, Send, Volume2, Maximize2 } from "lucide-react";
+import { ChevronRight, X, Send, Volume2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // main window states
@@ -14,7 +13,8 @@ type State =
   | { mode: "expanded" }
   | { mode: "running" }
   | { mode: "help"; screenshot: string }
-  | { mode: "voiceResponse" };
+  | { mode: "voiceResponse" }
+  | { mode: "spotlight" };
 
 type Action =
   | { type: "EXPAND" }
@@ -26,7 +26,10 @@ type Action =
   | { type: "AGENT_STOP" }
   | { type: "VOICE_RESPONSE" }
   | { type: "VOICE_DISMISS" }
-  | { type: "VOICE_EXPAND" };
+  | { type: "VOICE_EXPAND" }
+  | { type: "SPOTLIGHT" }
+  | { type: "SPOTLIGHT_CANCEL" }
+  | { type: "SPOTLIGHT_SUBMIT" };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -53,6 +56,12 @@ function reducer(state: State, action: Action): State {
       return { mode: "idle" };
     case "VOICE_EXPAND":
       return { mode: "expanded" };
+    case "SPOTLIGHT":
+      return { mode: "spotlight" };
+    case "SPOTLIGHT_CANCEL":
+      return { mode: "idle" };
+    case "SPOTLIGHT_SUBMIT":
+      return { mode: "expanded" };
     default:
       return state;
   }
@@ -65,6 +74,7 @@ const SIZES: Record<string, { w: number; h: number; centered?: boolean }> = {
   running: { w: 400, h: 520 },
   help: { w: 520, h: 420, centered: true },
   voiceResponse: { w: 320, h: 400 },
+  spotlight: { w: 600, h: 72, centered: true },
 };
 
 export default function MainWindow() {
@@ -72,6 +82,7 @@ export default function MainWindow() {
   const { submit } = useAgent();
 
   const helpPromptRef = useRef("");
+  const spotlightPromptRef = useRef("");
   const submitRef = useRef(submit);
 
   useEffect(() => {
@@ -128,6 +139,11 @@ export default function MainWindow() {
       // update speak text as it comes in
       listen<{ audio: string; text: string }>("agent:speak", (e) => {
         setSpeakText(e.payload.text);
+      }),
+
+      // spotlight mode (Cmd+Shift+Space)
+      listen("hotkey-spotlight", () => {
+        dispatch({ type: "SPOTLIGHT" });
       }),
     ];
 
@@ -209,64 +225,128 @@ export default function MainWindow() {
     );
   }
 
-  // VOICE RESPONSE MODE - speak text on top, messages below
-  if (state.mode === "voiceResponse") {
-    const handleDismiss = () => {
-      dispatch({ type: "VOICE_DISMISS" });
-      setSpeakText("");
-    };
-
-    const handleExpand = () => {
-      dispatch({ type: "VOICE_EXPAND" });
-      setSpeakText("");
+  // SPOTLIGHT MODE - quick input centered on screen
+  if (state.mode === "spotlight") {
+    const handleSubmit = async () => {
+      const prompt = spotlightPromptRef.current;
+      if (!prompt.trim()) return;
+      dispatch({ type: "SPOTLIGHT_SUBMIT" });
+      await submitRef.current(prompt);
+      spotlightPromptRef.current = "";
     };
 
     return (
       <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: -10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.15 }}
+        className="h-full w-full flex items-center px-4 bg-black/90 backdrop-blur-xl rounded-2xl border border-white/15 shadow-2xl"
+      >
+        <img src="/windows-computer-icon.png" className="w-5 h-5 opacity-70 mr-3" alt="" />
+        <input
+          type="text"
+          autoFocus
+          onChange={(e) => (spotlightPromptRef.current = e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSubmit();
+            if (e.key === "Escape") dispatch({ type: "SPOTLIGHT_CANCEL" });
+          }}
+          placeholder="What would you like me to do?"
+          className="flex-1 bg-transparent text-white/90 text-base placeholder:text-white/30 focus:outline-none"
+        />
+        <button
+          onClick={handleSubmit}
+          className="ml-2 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+        >
+          <Send size={16} className="text-white/70" />
+        </button>
+      </motion.div>
+    );
+  }
+
+  // VOICE RESPONSE MODE - conversational, speak text is the hero
+  if (state.mode === "voiceResponse") {
+    return (
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="h-full w-full flex flex-col bg-black/95 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden"
+        className="h-full w-full flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden relative cursor-pointer select-none"
+        onClick={() => dispatch({ type: "VOICE_EXPAND" })}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          dispatch({ type: "VOICE_DISMISS" });
+          setSpeakText("");
+        }}
       >
-        {/* header */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-white/5 shrink-0">
-          <div className="flex items-center gap-1.5">
-            <Volume2 size={12} className={`text-orange-400 ${isRunning ? "animate-pulse" : ""}`} />
-            <span className="text-[10px] text-white/40">voice</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleDismiss}
-              className="p-1 rounded text-white/40 hover:text-white/60 hover:bg-white/5"
-            >
-              <X size={14} />
-            </button>
-            <button
-              onClick={handleExpand}
-              className="p-1 rounded text-white/40 hover:text-white/60 hover:bg-white/5"
-            >
-              <Maximize2 size={14} />
-            </button>
-          </div>
+        {/* ambient glow - pulses when running */}
+        <motion.div
+          className="absolute inset-0 pointer-events-none"
+          animate={{
+            background: isRunning
+              ? [
+                  "radial-gradient(circle at 50% 50%, rgba(251,146,60,0.08) 0%, transparent 70%)",
+                  "radial-gradient(circle at 50% 50%, rgba(251,146,60,0.15) 0%, transparent 70%)",
+                  "radial-gradient(circle at 50% 50%, rgba(251,146,60,0.08) 0%, transparent 70%)",
+                ]
+              : "radial-gradient(circle at 50% 50%, rgba(251,146,60,0.05) 0%, transparent 70%)",
+          }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+        />
+
+        {/* speak text - large, centered, hero with dynamic sizing */}
+        <div className="flex-1 flex items-center justify-center px-6 py-8">
+          <AnimatePresence mode="wait">
+            {speakText ? (
+              <motion.p
+                key={speakText}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                transition={{ duration: 0.3 }}
+                className={`text-white/90 leading-relaxed text-center font-light ${
+                  speakText.length > 200 ? "text-sm" :
+                  speakText.length > 100 ? "text-base" :
+                  "text-lg"
+                }`}
+              >
+                {speakText}
+              </motion.p>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex flex-col items-center gap-3"
+              >
+                {isRunning ? (
+                  <>
+                    <motion.div
+                      className="w-2 h-2 rounded-full bg-orange-400"
+                      animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                    />
+                    <span className="text-white/30 text-xs">thinking...</span>
+                  </>
+                ) : (
+                  <span className="text-white/20 text-sm">tap to expand</span>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* speak text - rotates as new ones come */}
-        <AnimatePresence mode="wait">
-          {speakText && (
-            <motion.div
-              key={speakText}
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="px-3 py-3 border-b border-white/5 bg-gradient-to-r from-orange-500/10 to-transparent"
-            >
-              <p className="text-white/90 text-sm leading-relaxed">{speakText}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* messages/actions log */}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <MessagesDisplay className="h-full px-3 py-2" />
+        {/* subtle status indicator at bottom */}
+        <div className="absolute bottom-3 left-0 right-0 flex justify-center">
+          <motion.div
+            className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/5"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <Volume2 size={10} className={`text-orange-400/60 ${isRunning ? "animate-pulse" : ""}`} />
+            <span className="text-[9px] text-white/30">
+              {isRunning ? "speaking" : "done"}
+            </span>
+          </motion.div>
         </div>
       </motion.div>
     );
