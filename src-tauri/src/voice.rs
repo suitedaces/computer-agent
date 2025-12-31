@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
+use tokio::sync::broadcast;
 
 use deepgram::common::options::{Encoding, Model, Options};
 use deepgram::common::stream_response::StreamResponse;
@@ -198,6 +199,130 @@ fn start_audio_capture(
     });
 
     Ok((audio_rx, AudioConfig { sample_rate, channels }))
+}
+
+// starts audio capture with broadcast channel for PTT (allows multiple subscribers for reconnection)
+fn start_audio_capture_broadcast(
+    is_running: Arc<AtomicBool>,
+    log_prefix: &'static str,
+) -> Result<(broadcast::Sender<Vec<f32>>, AudioConfig), String> {
+    let host = cpal::default_host();
+    let device = host
+        .default_input_device()
+        .ok_or("no input device found")?;
+    println!("[{}] using device: {}", log_prefix, device.name().unwrap_or_default());
+
+    let config = device
+        .default_input_config()
+        .map_err(|e| format!("no input config: {}", e))?;
+    let sample_rate = config.sample_rate().0;
+    let channels = config.channels();
+    let sample_format = config.sample_format();
+    println!("[{}] config: {}Hz, {} channels, {:?}", log_prefix, sample_rate, channels, sample_format);
+
+    let (audio_tx, _) = broadcast::channel::<Vec<f32>>(100);
+    let audio_tx_clone = audio_tx.clone();
+
+    std::thread::spawn(move || {
+        let stream = match sample_format {
+            cpal::SampleFormat::F32 => {
+                let tx = audio_tx_clone.clone();
+                let running = is_running.clone();
+                device
+                    .build_input_stream(
+                        &config.into(),
+                        move |data: &[f32], _: &_| {
+                            if running.load(Ordering::SeqCst) {
+                                let _ = tx.send(data.to_vec());
+                            }
+                        },
+                        |err| println!("[audio] stream error: {}", err),
+                        None,
+                    )
+                    .ok()
+            }
+            cpal::SampleFormat::I16 => {
+                let tx = audio_tx_clone.clone();
+                let running = is_running.clone();
+                device
+                    .build_input_stream(
+                        &config.into(),
+                        move |data: &[i16], _: &_| {
+                            if running.load(Ordering::SeqCst) {
+                                let floats: Vec<f32> =
+                                    data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
+                                let _ = tx.send(floats);
+                            }
+                        },
+                        |err| println!("[audio] stream error: {}", err),
+                        None,
+                    )
+                    .ok()
+            }
+            _ => {
+                println!("[audio] unsupported format: {:?}", sample_format);
+                None
+            }
+        };
+
+        if let Some(stream) = stream {
+            if stream.play().is_ok() {
+                println!("[{}] audio capture started", log_prefix);
+                while is_running.load(Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            drop(stream);
+        }
+        println!("[{}] audio capture stopped", log_prefix);
+    });
+
+    Ok((audio_tx, AudioConfig { sample_rate, channels }))
+}
+
+// starts audio forwarder from broadcast receiver (for reconnection support)
+fn start_audio_forwarder_from_broadcast(
+    mut audio_rx: broadcast::Receiver<Vec<f32>>,
+    channels: u16,
+    is_running: Arc<AtomicBool>,
+) -> futures::channel::mpsc::Receiver<Result<bytes::Bytes, std::io::Error>> {
+    let (mut ws_tx, ws_rx) =
+        futures::channel::mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(100);
+
+    tokio::spawn(async move {
+        while is_running.load(Ordering::SeqCst) {
+            match tokio::time::timeout(
+                tokio::time::Duration::from_millis(100),
+                audio_rx.recv()
+            ).await {
+                Ok(Ok(samples)) => {
+                    let mono: Vec<f32> = if channels > 1 {
+                        samples
+                            .chunks(channels as usize)
+                            .map(|chunk| chunk.iter().sum::<f32>() / channels as f32)
+                            .collect()
+                    } else {
+                        samples
+                    };
+
+                    let mut bytes = BytesMut::with_capacity(mono.len() * 2);
+                    for sample in mono {
+                        let s = (sample * i16::MAX as f32) as i16;
+                        bytes.put_i16_le(s);
+                    }
+
+                    if ws_tx.try_send(Ok(bytes.freeze())).is_err() {
+                        break;
+                    }
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                Ok(Err(broadcast::error::RecvError::Closed)) => break,
+                Err(_) => continue, // timeout
+            }
+        }
+    });
+
+    ws_rx
 }
 
 // starts audio forwarder task that converts samples to linear16 and sends to websocket
@@ -411,38 +536,65 @@ impl PushToTalkSession {
         let is_running = self.is_running.clone();
         let accumulated = self.accumulated_text.clone();
 
-        let (audio_rx, config) = start_audio_capture(is_running.clone(), "ptt")?;
-        let ws_rx = start_audio_forwarder(audio_rx, config.channels, is_running.clone());
+        // use broadcast channel so we can reconnect to deepgram if it closes early
+        let (audio_tx, config) = start_audio_capture_broadcast(is_running.clone(), "ptt")?;
 
         let is_running_dg = is_running.clone();
         let app = app_handle.clone();
+        let channels = config.channels;
+        let sample_rate = config.sample_rate;
+
         tokio::spawn(async move {
-            let accumulated_cb = accumulated.clone();
-            let app_cb = app.clone();
-            let result = run_deepgram_streaming(
-                api_key,
-                config.sample_rate,
-                ws_rx,
-                is_running_dg.clone(),
-                Box::new(move |text, is_final| {
-                    println!("[ptt] transcript: {} (final: {})", text, is_final);
-                    let _ = app_cb.emit("ptt:interim", text.to_string());
+            // reconnection loop - keep connecting to deepgram while user holds key
+            while is_running_dg.load(Ordering::SeqCst) {
+                let ws_rx = start_audio_forwarder_from_broadcast(
+                    audio_tx.subscribe(),
+                    channels,
+                    is_running_dg.clone(),
+                );
 
-                    if is_final {
-                        let mut acc = accumulated_cb.lock().unwrap();
-                        if !acc.is_empty() {
-                            acc.push(' ');
+                let accumulated_cb = accumulated.clone();
+                let app_cb = app.clone();
+                let result = run_deepgram_streaming(
+                    api_key.clone(),
+                    sample_rate,
+                    ws_rx,
+                    is_running_dg.clone(),
+                    Box::new(move |text, is_final| {
+                        println!("[ptt] transcript: {} (final: {})", text, is_final);
+
+                        if is_final {
+                            let mut acc = accumulated_cb.lock().unwrap();
+                            if !acc.is_empty() {
+                                acc.push(' ');
+                            }
+                            acc.push_str(text);
+                            // emit full accumulated text
+                            let _ = app_cb.emit("ptt:interim", acc.clone());
+                        } else {
+                            // emit accumulated + current interim
+                            let acc = accumulated_cb.lock().unwrap();
+                            let display = if acc.is_empty() {
+                                text.to_string()
+                            } else {
+                                format!("{} {}", *acc, text)
+                            };
+                            let _ = app_cb.emit("ptt:interim", display);
                         }
-                        acc.push_str(text);
-                    }
-                }),
-            ).await;
+                    }),
+                ).await;
 
-            if let Err(e) = result {
-                println!("[ptt] error: {}", e);
-                let _ = app.emit("ptt:error", e);
+                if let Err(e) = &result {
+                    println!("[ptt] deepgram stream ended: {}", e);
+                }
+
+                // if still running, reconnect after brief delay
+                if is_running_dg.load(Ordering::SeqCst) {
+                    println!("[ptt] reconnecting to deepgram...");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
             }
-            is_running_dg.store(false, Ordering::SeqCst);
+            println!("[ptt] deepgram task finished");
         });
 
         let _ = app_handle.emit("ptt:started", session_id);
