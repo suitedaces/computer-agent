@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bytes::{BufMut, BytesMut};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
@@ -16,6 +17,7 @@ use futures::StreamExt;
 // ============================================================================
 
 const ELEVENLABS_API_URL: &str = "https://api.elevenlabs.io/v1/text-to-speech";
+const TTS_CACHE_MAX_SIZE: usize = 50; // max cached entries
 
 #[derive(Error, Debug)]
 pub enum TtsError {
@@ -30,6 +32,7 @@ pub struct TtsClient {
     api_key: String,
     voice_id: String,
     model_id: String,
+    cache: Mutex<HashMap<String, String>>, // text -> base64 audio
 }
 
 impl TtsClient {
@@ -39,11 +42,20 @@ impl TtsClient {
             api_key,
             voice_id,
             model_id: "eleven_flash_v2_5".to_string(), // 75ms latency
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
-    /// synthesize text to speech, returns base64-encoded mp3 audio
+    /// synthesize text to speech, returns base64-encoded mp3 audio (cached)
     pub async fn synthesize(&self, text: &str) -> Result<String, TtsError> {
+        // check cache first
+        {
+            let cache = self.cache.lock().unwrap();
+            if let Some(cached) = cache.get(text) {
+                return Ok(cached.clone());
+            }
+        }
+
         let url = format!("{}/{}/stream", ELEVENLABS_API_URL, self.voice_id);
 
         let response = self
@@ -72,6 +84,18 @@ impl TtsClient {
 
         let bytes = response.bytes().await?;
         let base64_audio = BASE64.encode(&bytes);
+
+        // store in cache
+        {
+            let mut cache = self.cache.lock().unwrap();
+            // evict oldest if too large (simple FIFO-ish eviction)
+            if cache.len() >= TTS_CACHE_MAX_SIZE {
+                if let Some(key) = cache.keys().next().cloned() {
+                    cache.remove(&key);
+                }
+            }
+            cache.insert(text.to_string(), base64_audio.clone());
+        }
 
         Ok(base64_audio)
     }

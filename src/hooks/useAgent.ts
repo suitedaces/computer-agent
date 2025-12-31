@@ -4,8 +4,15 @@ import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
 
-// play base64-encoded mp3 audio
-function playAudio(base64Audio: string) {
+// audio queue to prevent overlapping playback
+const audioQueue: string[] = [];
+let isPlaying = false;
+
+async function playNext() {
+  if (isPlaying || audioQueue.length === 0) return;
+  isPlaying = true;
+
+  const base64Audio = audioQueue.shift()!;
   try {
     const binaryString = atob(base64Audio);
     const bytes = new Uint8Array(binaryString.length);
@@ -15,11 +22,29 @@ function playAudio(base64Audio: string) {
     const blob = new Blob([bytes], { type: "audio/mpeg" });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);
-    audio.play().catch(console.error);
+
+    await new Promise<void>((resolve) => {
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.play().catch(() => resolve());
+    });
   } catch (e) {
     console.error("Audio playback failed:", e);
   }
+
+  isPlaying = false;
+  playNext(); // play next in queue
+}
+
+function queueAudio(base64Audio: string) {
+  audioQueue.push(base64Audio);
+  playNext();
 }
 
 export function useAgent() {
@@ -160,7 +185,8 @@ export function useAgent() {
     const unlistenSpeakPromise = listen<{ audio: string; text: string }>("agent:speak", (event) => {
       const { audio, text } = event.payload;
       console.log("[voice] Speaking:", text.slice(0, 50) + "...");
-      playAudio(audio);
+      addMessage({ role: "assistant", content: text, type: "speak", audioData: audio });
+      queueAudio(audio);
     });
 
     return () => {

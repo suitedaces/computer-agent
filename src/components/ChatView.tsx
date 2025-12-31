@@ -38,6 +38,9 @@ import {
   Mic,
   MicOff,
   Settings,
+  Volume2,
+  Play,
+  Pause,
 } from "lucide-react";
 import SettingsContent from "./SettingsContent";
 import { invoke } from "@tauri-apps/api/core";
@@ -316,6 +319,66 @@ function ScreenshotBlock({ msg }: { msg: ChatMessage }) {
   );
 }
 
+function SpeakBubble({ msg }: { msg: ChatMessage }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const togglePlay = () => {
+    if (!msg.audioData) return;
+
+    if (!audioRef.current) {
+      const binaryString = atob(msg.audioData);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      audioRef.current = new Audio(url);
+      audioRef.current.onended = () => setIsPlaying(false);
+    }
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex justify-start"
+    >
+      <div className="flex items-start gap-2 max-w-full">
+        <motion.button
+          onClick={togglePlay}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
+          className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+            isPlaying
+              ? "bg-orange-500/30 border border-orange-400/30 text-orange-300"
+              : "bg-white/10 border border-white/20 text-white/60 hover:text-white/80"
+          }`}
+        >
+          {isPlaying ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+        </motion.button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <Volume2 size={12} className="text-orange-300" />
+            <span className="text-[10px] text-white/40">Voice response</span>
+          </div>
+          <p className="text-[13px] text-white/80 leading-relaxed">{msg.content}</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // render content with embedded URLs as clickable links
 function renderContentWithUrls(content: string): React.ReactNode {
   const urlPattern = /\|\|(.+?)\|\|/g;
@@ -427,6 +490,10 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   if (msg.type === "action" && msg.action?.action === "screenshot") {
     return <ScreenshotBlock msg={msg} />;
+  }
+
+  if (msg.type === "speak") {
+    return <SpeakBubble msg={msg} />;
   }
 
   const getIcon = () => {
@@ -881,6 +948,7 @@ export default function ChatView({ variant }: ChatViewProps) {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState("");
   const [usedVoiceInput, setUsedVoiceInput] = useState(false);
+  const [showVoiceConfirm, setShowVoiceConfirm] = useState(false);
 
   // settings panel state
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -902,9 +970,10 @@ export default function ChatView({ variant }: ChatViewProps) {
       const { text, is_final } = event.payload;
       if (is_final) {
         const current = inputTextRef.current;
-        setInputText(current ? current + " " + text : text);
+        const newText = current ? current + " " + text : text;
+        setInputText(newText);
         setVoiceText("");
-        setUsedVoiceInput(true); // mark that voice was used for this input
+        setUsedVoiceInput(true);
       } else {
         setVoiceText(text);
       }
@@ -913,6 +982,10 @@ export default function ChatView({ variant }: ChatViewProps) {
     const unlistenStopped = listen("voice:stopped", () => {
       setIsVoiceActive(false);
       setVoiceText("");
+      // show confirmation when recording stops (if there's text)
+      if (inputTextRef.current.trim()) {
+        setShowVoiceConfirm(true);
+      }
     });
 
     const unlistenError = listen<string>("voice:error", (event) => {
@@ -1143,12 +1216,52 @@ export default function ChatView({ variant }: ChatViewProps) {
 
           {/* input or stop hint */}
           <div className={`${inputPadding} shrink-0`}>
+            {/* voice confirmation bar */}
+            <AnimatePresence>
+              {showVoiceConfirm && !isRunning && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="glass-card mb-2 p-2"
+                >
+                  <div className="flex items-start gap-2 mb-2">
+                    <Mic size={14} className="text-orange-300 shrink-0 mt-0.5" />
+                    <p className="text-[12px] text-white/80 leading-relaxed break-words whitespace-pre-wrap">{inputText}</p>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <motion.button
+                      onClick={() => setShowVoiceConfirm(false)}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="px-3 py-1 rounded-lg bg-white/10 border border-white/10 text-[11px] text-white/70 hover:text-white/90 hover:bg-white/15 transition-colors"
+                    >
+                      Edit
+                    </motion.button>
+                    <motion.button
+                      onClick={() => {
+                        setShowVoiceConfirm(false);
+                        setVoiceMode(true);
+                        setUsedVoiceInput(false);
+                        submit();
+                      }}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="px-3 py-1 rounded-lg bg-orange-500/30 border border-orange-400/30 text-[11px] text-orange-300 hover:bg-orange-500/40 transition-colors"
+                    >
+                      Send
+                    </motion.button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {isRunning ? (
               <div className="glass-card flex items-center justify-center gap-2 p-3 text-red-300/70">
                 <Square size={14} />
                 <span className="text-[12px]">⌘⇧S to stop</span>
               </div>
-            ) : (
+            ) : showVoiceConfirm ? null : (
               <div className="glass-card flex items-center gap-2 p-2">
                 <motion.button
                   onClick={toggleVoice}

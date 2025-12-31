@@ -22,7 +22,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  type?: "thinking" | "action" | "error" | "info" | "bash";
+  type?: "thinking" | "action" | "error" | "info" | "bash" | "speak";
+  audioData?: string; // base64 audio for speak messages
   action?: ComputerAction;
   screenshot?: string;
   pending?: boolean;
