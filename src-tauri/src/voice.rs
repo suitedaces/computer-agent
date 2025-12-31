@@ -100,8 +100,9 @@ impl TtsClient {
 
 pub fn create_tts_client() -> Option<TtsClient> {
     let api_key = std::env::var("ELEVENLABS_API_KEY").ok()?;
+    // default to southern grandpa
     let voice_id = std::env::var("ELEVENLABS_VOICE_ID")
-        .unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string());
+        .unwrap_or_else(|_| "NOpBlnGInO9m6vDvFkFC".to_string());
     Some(TtsClient::new(api_key, voice_id))
 }
 

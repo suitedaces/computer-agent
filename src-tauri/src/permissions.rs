@@ -39,6 +39,13 @@ pub struct BrowserProfileStatus {
 pub struct ApiKeyStatus {
     pub anthropic: bool,
     pub deepgram: bool,
+    pub elevenlabs: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceSettings {
+    pub elevenlabs_voice_id: Option<String>,
 }
 
 // check all permissions
@@ -387,45 +394,61 @@ pub fn get_api_key_status() -> ApiKeyStatus {
     ApiKeyStatus {
         anthropic: std::env::var("ANTHROPIC_API_KEY").is_ok(),
         deepgram: std::env::var("DEEPGRAM_API_KEY").is_ok(),
+        elevenlabs: std::env::var("ELEVENLABS_API_KEY").is_ok(),
     }
 }
 
-// save api key to .env file
+// get voice settings
 #[tauri::command]
-pub fn save_api_key(service: String, key: String) -> Result<(), String> {
+pub fn get_voice_settings() -> VoiceSettings {
+    VoiceSettings {
+        elevenlabs_voice_id: std::env::var("ELEVENLABS_VOICE_ID").ok(),
+    }
+}
+
+// save voice settings
+#[tauri::command]
+pub fn save_voice_settings(voice_id: String) -> Result<(), String> {
+    save_env_var("ELEVENLABS_VOICE_ID", &voice_id)
+}
+
+// helper to save env var to .env file
+fn save_env_var(var_name: &str, value: &str) -> Result<(), String> {
     let env_path = std::env::current_dir()
         .map(|p| p.join(".env"))
         .unwrap_or_else(|_| std::path::PathBuf::from(".env"));
 
-    // read existing content
     let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
-
-    let var_name = match service.as_str() {
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "deepgram" => "DEEPGRAM_API_KEY",
-        _ => return Err("Unknown service".to_string()),
-    };
-
-    // update or add the key
     let mut lines: Vec<String> = existing.lines().map(String::from).collect();
     let mut found = false;
 
     for line in &mut lines {
         if line.starts_with(&format!("{}=", var_name)) {
-            *line = format!("{}={}", var_name, key);
+            *line = format!("{}={}", var_name, value);
             found = true;
             break;
         }
     }
 
     if !found {
-        lines.push(format!("{}={}", var_name, key));
+        lines.push(format!("{}={}", var_name, value));
     }
 
     std::fs::write(&env_path, lines.join("\n")).map_err(|e| e.to_string())?;
-
-    // also set in current process
-    std::env::set_var(var_name, &key);
+    std::env::set_var(var_name, value);
 
     Ok(())
+}
+
+// save api key to .env file
+#[tauri::command]
+pub fn save_api_key(service: String, key: String) -> Result<(), String> {
+    let var_name = match service.as_str() {
+        "anthropic" => "ANTHROPIC_API_KEY",
+        "deepgram" => "DEEPGRAM_API_KEY",
+        "elevenlabs" => "ELEVENLABS_API_KEY",
+        _ => return Err("Unknown service".to_string()),
+    };
+
+    save_env_var(var_name, &key)
 }

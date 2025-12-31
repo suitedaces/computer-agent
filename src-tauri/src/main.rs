@@ -1037,6 +1037,8 @@ fn main() {
             permissions::reset_browser_profile,
             permissions::get_api_key_status,
             permissions::save_api_key,
+            permissions::get_voice_settings,
+            permissions::save_voice_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
