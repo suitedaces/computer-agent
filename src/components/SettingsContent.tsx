@@ -206,6 +206,8 @@ const VOICE_PRESETS = [
   { id: "pNInz6obpgDQGcFmaJgB", name: "Adam" },
   { id: "yoZ06aMxZJJ28mfd3POQ", name: "Sam" },
   { id: "jBpfuIE2acCO8z3wKNLl", name: "Gigi" },
+  { id: "eVItLK1UvXctxuaRV", name: "$eX¥" },
+  { id: "N5d2d1s5cnuy6wghabpn", name: "Desi Uncle" },
 ];
 
 const DEFAULT_VOICE_ID = "NOpBlnGInO9m6vDvFkFC";
