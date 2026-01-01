@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::sync::broadcast;
 
-use deepgram::common::options::{Encoding, Model, Options};
+use deepgram::common::options::{Encoding, Language, Model, Options};
 use deepgram::common::stream_response::StreamResponse;
 use deepgram::Deepgram;
 use futures::StreamExt;
@@ -380,7 +380,8 @@ async fn run_deepgram_streaming(
     let dg = Deepgram::new(&api_key).map_err(|e| format!("deepgram init failed: {}", e))?;
 
     let options = Options::builder()
-        .model(Model::Nova2)
+        .model(Model::Nova3)
+        .language(Language::multi)
         .smart_format(true)
         .build();
 
