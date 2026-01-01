@@ -109,6 +109,7 @@ export default function MainWindow() {
   // state for speak text in voice response mode
   const [speakText, setSpeakText] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [isPttActive, setIsPttActive] = useState(false);
 
   // tool messages for voice response mode (must be before any early returns)
   const messages = useAgentStore((s) => s.messages);
@@ -317,11 +318,15 @@ export default function MainWindow() {
     };
 
     const handleMicDown = () => {
+      setIsPttActive(true);
       invoke("start_ptt", { mode: selectedMode }).catch(console.error);
     };
 
     const handleMicUp = () => {
-      invoke("stop_ptt").catch(console.error);
+      if (isPttActive) {
+        setIsPttActive(false);
+        invoke("stop_ptt").catch(console.error);
+      }
     };
 
     return (
