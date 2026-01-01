@@ -167,7 +167,7 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
       <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#30363d]">
         <div className="px-2 py-1.5 font-mono flex items-center gap-2">
           <span className="text-[#3fb950] text-[11px] select-none">$</span>
-          <span className={`text-[11px] text-[#e6edf3] break-all flex-1 ${msg.pending ? "sweep-text" : ""}`}>
+          <span className={`text-[11px] text-[#e6edf3] break-all flex-1 select-text ${msg.pending ? "sweep-text" : ""}`}>
             {msg.content}
           </span>
           {msg.pending && <span className="text-[8px] text-[#8b949e] animate-pulse shrink-0">...</span>}
