@@ -201,13 +201,7 @@ function LoadingSkeleton() {
 
 const VOICE_PRESETS = [
   { id: "NOpBlnGInO9m6vDvFkFC", name: "Southern Grandpa (Default)" },
-  { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel" },
-  { id: "EXAVITQu4vr4xnSDxMaL", name: "Bella" },
-  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam" },
-  { id: "yoZ06aMxZJJ28mfd3POQ", name: "Sam" },
-  { id: "jBpfuIE2acCO8z3wKNLl", name: "Gigi" },
-  { id: "eVItLK1UvXctxuaRV", name: "$eX¥" },
-  { id: "N5d2d1s5cnuy6wghabpn", name: "Desi Uncle" },
+  { id: "PB6BdkFkZLbI39GHdnbQ", name: "$eX¥" },
 ];
 
 const DEFAULT_VOICE_ID = "NOpBlnGInO9m6vDvFkFC";
