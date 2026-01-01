@@ -303,7 +303,7 @@ impl BrowserClient {
         Ok(format!("Successfully pressed key: {key}"))
     }
 
-    // tool: scroll
+    // tool: scroll - uses JS for reliability (CDP Input.dispatchMouseEvent can timeout)
     pub async fn scroll(&mut self, direction: &str, amount: Option<i64>) -> Result<String> {
         let page = self.selected_page()?;
         let pixels = amount.unwrap_or(500);
@@ -316,27 +316,17 @@ impl BrowserClient {
             _ => return Err(anyhow!("Invalid scroll direction: {}", direction)),
         };
 
-        // use CDP Input.dispatchMouseEvent with type=mouseWheel
-        use chromiumoxide::cdp::browser_protocol::input::{
-            DispatchMouseEventParams, DispatchMouseEventType,
-        };
+        // use JS scrollBy - faster and more reliable than CDP mouse wheel events
+        let js = format!("window.scrollBy({}, {})", delta_x, delta_y);
 
-        page.execute(
-            DispatchMouseEventParams::builder()
-                .r#type(DispatchMouseEventType::MouseWheel)
-                .x(400)  // center-ish of viewport
-                .y(400)
-                .delta_x(delta_x as f64)
-                .delta_y(delta_y as f64)
-                .build()
-                .unwrap(),
-        )
-        .await?;
-
-        // brief wait for scroll to complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        Ok(format!("Scrolled {} by {} pixels", direction, pixels))
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            page.evaluate(js)
+        ).await {
+            Ok(Ok(_)) => Ok(format!("Scrolled {} by {} pixels", direction, pixels)),
+            Ok(Err(e)) => Err(anyhow!("Scroll failed: {e}")),
+            Err(_) => Err(anyhow!("Scroll timed out")),
+        }
     }
 
     // tool: navigate_page
