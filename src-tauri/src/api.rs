@@ -244,9 +244,13 @@ impl AnthropicClient {
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
         };
 
-        // only append voice instructions when voice mode is enabled (speak tool available)
+        // append model-specific voice instructions when voice mode is enabled
         if voice_mode {
-            system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
+            if self.model.contains("haiku") {
+                system.push_str(VOICE_PROMPT_HAIKU);
+            } else {
+                system.push_str(VOICE_PROMPT_OPUS);
+            }
         }
 
         let tools = self.build_tools(mode, voice_mode);
@@ -681,27 +685,48 @@ If browser tools fail with connection errors, Chrome may have been closed. Run t
 open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.taskhomie-chrome" --profile-directory=Default --no-first-run
 Then wait a few seconds and retry the browser tool."#;
 
-const VOICE_SYSTEM_PROMPT_APPEND: &str = r#"
+// voice prompt for opus/sonnet - lighter touch, they follow instructions well
+const VOICE_PROMPT_OPUS: &str = r#"
 
-<voice_mode_instructions>
-When you see user messages wrapped in <voice_input> tags, the user spoke to you and can only hear your response via the speak tool. They cannot see any text you output.
+You MUST call tools on every single turn. Never respond with just text - always take action.
 
-CRITICAL: You MUST call speak() frequently - at least every 2-3 tool calls. NEVER leave the user hanging in silence. Call speak() at the start to tell the user what you're doing, give progress updates every few actions, and call it at the end with your conclusion. Without speak(), the user hears nothing and thinks you are stuck or broken.
+CRITICAL: ALWAYS call speak() FIRST to tell the user what you're about to do. Keep them in the loop constantly.
 
-Output behavior:
-- Keep text blocks EXTREMELY short - just a few words for your own notes. The user never sees them.
-- speak() is the only way the user hears from you. Without it, you are silent.
-- Call speak() for all responses, confirmations, questions, errors, and status updates.
+Example multi-step task (user asks to play a song on spotify):
+Turn 1: [speak: "Opening Spotify and searching for that song"] [bash: open -a "Spotify"]
+Turn 2: [computer: click search] [computer: type song name]
+Turn 3: [speak: "Found it, playing now"] [computer: click play button]
 
-Speech style:
-- Conversational and concise (1-3 sentences per call)
-- Natural spoken language - say "two hundred" not "200", spell out abbreviations
-- No markdown, code blocks, URLs, or formatting - just words
+Call speak() at the START, then every 2-3 tool calls for progress updates, and at the END. The user is BLIND to your text - speak() is your ONLY way to communicate.
 
-Continue working after speaking - don't wait for acknowledgment. The user will interrupt if needed.
+Parallel tools: If multiple independent actions exist, call them all simultaneously in one response.
 
-START BY CALLING speak() NOW to tell the user what you're about to do. THEN CALL speak() EVERY 2-3 TOOL CALLS TO KEEP THEM UPDATED.
-</voice_mode_instructions>"#;
+Speech style: Conversational, 1-3 sentences. Say "two hundred" not "200". No markdown or URLs."#;
+
+// voice prompt for haiku - needs stronger, more explicit guidance
+const VOICE_PROMPT_HAIKU: &str = r#"
+
+<MANDATORY_TOOL_USE>
+You MUST call at least one tool on EVERY turn. Text-only responses are FORBIDDEN.
+</MANDATORY_TOOL_USE>
+
+<VOICE_MODE>
+CRITICAL: ALWAYS call speak() FIRST before any other tool. The user cannot see your text - speak() is your ONLY communication channel.
+
+Example multi-step task (user asks to play a song on spotify):
+Turn 1: [speak: "Opening Spotify and searching for that song"] [bash: open -a "Spotify"]
+Turn 2: [computer: click search] [computer: type song name]
+Turn 3: [speak: "Found it, playing now"] [computer: click play button]
+
+Call speak() at the START, then every 2-3 tool calls for progress updates, and at the END.
+Keep spoken responses 1-2 sentences.
+</VOICE_MODE>
+
+<PARALLEL_EXECUTION>
+When multiple independent actions are possible, call ALL tools in parallel in a single response.
+</PARALLEL_EXECUTION>
+
+Speech style: Conversational. Say "two hundred" not "200". No markdown or URLs."#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
