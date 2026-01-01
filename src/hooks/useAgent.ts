@@ -134,6 +134,11 @@ function attachListeners() {
       case "browser_result":
         s.markLastActionComplete();
         break;
+
+      case "web_result":
+        // server-side web tools (web_search, web_fetch) completed
+        s.markLastActionComplete();
+        break;
     }
   });
 

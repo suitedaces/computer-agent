@@ -742,11 +742,14 @@ impl Agent {
 
                     ContentBlock::WebSearchToolResult { .. } => {
                         println!("[agent] Web search tool result received");
-                        // results are in the message history, no action needed
+                        // emit to clear pending state in UI
+                        self.emit(&app_handle, "web_result", "Web search complete", None, None);
                     }
 
                     ContentBlock::WebFetchToolResult { .. } => {
                         println!("[agent] Web fetch tool result received");
+                        // emit to clear pending state in UI
+                        self.emit(&app_handle, "web_result", "Web fetch complete", None, None);
                         // results are in the message history, no action needed
                     }
 

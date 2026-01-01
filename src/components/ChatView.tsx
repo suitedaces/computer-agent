@@ -796,6 +796,7 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
   const [voiceText, setVoiceText] = useState("");
   const [usedVoiceInput, setUsedVoiceInput] = useState(false);
   const [showVoiceConfirm, setShowVoiceConfirm] = useState(false);
+  const [isPttActive, setIsPttActive] = useState(false);
 
   // settings panel state - use prop if provided (compact mode), otherwise internal state
   const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
@@ -1109,9 +1110,22 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
             ) : showVoiceConfirm ? null : (
               <div className="glass-card flex items-center gap-2 p-2">
                 <motion.button
-                  onMouseDown={() => invoke("start_ptt", { mode: selectedMode }).catch(console.error)}
-                  onMouseUp={() => invoke("stop_ptt").catch(console.error)}
-                  onMouseLeave={() => invoke("stop_ptt").catch(console.error)}
+                  onMouseDown={() => {
+                    setIsPttActive(true);
+                    invoke("start_ptt", { mode: selectedMode }).catch(console.error);
+                  }}
+                  onMouseUp={() => {
+                    if (isPttActive) {
+                      setIsPttActive(false);
+                      invoke("stop_ptt").catch(console.error);
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (isPttActive) {
+                      setIsPttActive(false);
+                      invoke("stop_ptt").catch(console.error);
+                    }
+                  }}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors bg-white/5 border border-white/10 text-white/40 hover:text-orange-300 hover:bg-orange-500/20 hover:border-orange-400/30"
