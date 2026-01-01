@@ -379,6 +379,7 @@ mod storage_cmd {
 mod voice_cmd {
     use crate::voice::{VoiceSession, PushToTalkSession};
     use crate::get_screen_info;
+    use crate::panels;
     use std::sync::Arc;
     use tauri::{State, Manager, Emitter};
 
@@ -430,12 +431,18 @@ mod voice_cmd {
     pub async fn start_ptt(
         app_handle: tauri::AppHandle,
         state: State<'_, PttState>,
-        screenshot: Option<String>,
         mode: Option<String>,
     ) -> Result<(), String> {
         println!("[ptt cmd] start_ptt called");
 
         let mode_str = mode.unwrap_or_else(|| "computer".to_string());
+
+        // capture screenshot only for computer mode (like hotkey does)
+        let screenshot = if mode_str == "computer" {
+            panels::take_screenshot_excluding_app_sync().ok()
+        } else {
+            None
+        };
 
         // store screenshot and mode
         if let Some(ss) = &screenshot {
@@ -490,13 +497,72 @@ mod voice_cmd {
 
     #[tauri::command]
     pub async fn stop_ptt(
+        app_handle: tauri::AppHandle,
         state: State<'_, PttState>,
-    ) -> Result<(String, Option<String>), String> {
+    ) -> Result<(), String> {
         println!("[ptt cmd] stop_ptt called");
-        let (text, _session_id) = state.session.stop().await;
+
+        // play stop sound
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Pop.aiff")
+                .spawn()
+                .ok();
+        }
+
+        let expected_session_id = *state.current_session_id.lock().unwrap();
+        let (raw_text, result_session_id) = state.session.stop().await;
         let screenshot = state.screenshot.lock().unwrap().take();
-        println!("[ptt cmd] got text: '{}', screenshot: {}", text, screenshot.is_some());
-        Ok((text, screenshot))
+        let mode = state.mode.lock().unwrap().take();
+
+        if result_session_id != expected_session_id {
+            println!("[ptt cmd] stale result ignored: got session {} but expected {}", result_session_id, expected_session_id);
+            return Ok(());
+        }
+
+        // rewrite transcription to clean up speech artifacts
+        let text = if !raw_text.trim().is_empty() {
+            match std::env::var("ANTHROPIC_API_KEY") {
+                Ok(api_key) => {
+                    println!("[ptt cmd] rewriting transcription...");
+                    match crate::api::rewrite_transcription(&api_key, &raw_text).await {
+                        Ok(rewritten) => {
+                            println!("[ptt cmd] rewritten: '{}' -> '{}'", raw_text, rewritten);
+                            rewritten
+                        }
+                        Err(e) => {
+                            println!("[ptt cmd] rewrite failed: {}, using raw", e);
+                            raw_text
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("[ptt cmd] no ANTHROPIC_API_KEY, skipping rewrite");
+                    raw_text
+                }
+            }
+        } else {
+            raw_text
+        };
+
+        println!("[ptt cmd] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
+
+        // emit recording stopped
+        let _ = app_handle.emit("ptt:recording", serde_json::json!({
+            "recording": false,
+            "sessionId": result_session_id
+        }));
+
+        // emit result - frontend handles voice window visibility
+        let _ = app_handle.emit("ptt:result", serde_json::json!({
+            "text": text,
+            "screenshot": screenshot,
+            "mode": mode,
+            "sessionId": result_session_id
+        }));
+
+        Ok(())
     }
 
     #[tauri::command]

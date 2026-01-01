@@ -448,23 +448,30 @@ export default function MainWindow() {
             </span>
           </motion.div>
 
-          {/* mic button - hold to talk */}
-          <motion.button
-            onMouseDown={handleMicDown}
-            onMouseUp={handleMicUp}
-            onMouseLeave={handleMicUp}
-            disabled={isRunning}
-            className={`p-2.5 rounded-xl transition-colors ${
-              isRunning
-                ? "bg-white/5 text-white/20 cursor-not-allowed"
-                : "bg-white/10 hover:bg-orange-500/20 text-white/60 hover:text-orange-300"
-            }`}
-            title="Hold to speak"
-            whileHover={isRunning ? {} : { scale: 1.05 }}
-            whileTap={isRunning ? {} : { scale: 0.95 }}
-          >
-            <Mic size={16} />
-          </motion.button>
+          {/* mic button + shortcut hint */}
+          <div className="flex items-center gap-2">
+            {!isRunning && (
+              <span className="text-[9px] text-white/20">
+                {selectedMode === "browser" ? "⌃⇧B" : "⌃⇧C"}
+              </span>
+            )}
+            <motion.button
+              onMouseDown={handleMicDown}
+              onMouseUp={handleMicUp}
+              onMouseLeave={handleMicUp}
+              disabled={isRunning}
+              className={`p-2.5 rounded-xl transition-colors ${
+                isRunning
+                  ? "bg-white/5 text-white/20 cursor-not-allowed"
+                  : "bg-white/10 hover:bg-orange-500/20 text-white/60 hover:text-orange-300"
+              }`}
+              title={`Hold to speak (${selectedMode === "browser" ? "⌃⇧B" : "⌃⇧C"})`}
+              whileHover={isRunning ? {} : { scale: 1.05 }}
+              whileTap={isRunning ? {} : { scale: 0.95 }}
+            >
+              <Mic size={16} />
+            </motion.button>
+          </div>
         </div>
       </motion.div>
     );
