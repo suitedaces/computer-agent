@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ChatView from "./components/ChatView";
 import { useAgent } from "./hooks/useAgent";
 import { useAgentStore } from "./stores/agentStore";
-import { ChevronRight, X, Send, Volume2 } from "lucide-react";
+import { ChevronRight, X, Send, Volume2, Mic, Maximize2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // main window states
@@ -80,6 +80,7 @@ const SIZES: Record<string, { w: number; h: number; centered?: boolean }> = {
 export default function MainWindow() {
   const [state, dispatch] = useReducer(reducer, { mode: "idle" });
   const { submit } = useAgent();
+  const selectedMode = useAgentStore((s) => s.selectedMode);
 
   const helpPromptRef = useRef("");
   const spotlightPromptRef = useRef("");
@@ -315,17 +316,47 @@ export default function MainWindow() {
       invoke("hide_main_window").catch(() => {});
     };
 
+    const handleMicDown = () => {
+      invoke("start_ptt", { mode: selectedMode }).catch(console.error);
+    };
+
+    const handleMicUp = () => {
+      invoke("stop_ptt").catch(console.error);
+    };
+
     return (
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="h-full w-full flex flex-col bg-black/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden relative cursor-pointer select-none"
-        onClick={() => dispatch({ type: "VOICE_EXPAND" })}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          handleDismiss();
-        }}
+        className="h-full w-full flex flex-col bg-black/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden relative select-none"
       >
+        {/* titlebar */}
+        <div
+          data-tauri-drag-region
+          className="flex items-center justify-between px-3 py-2 border-b border-white/5"
+        >
+          <div className="flex items-center gap-2">
+            <img src="/windows-computer-icon.png" className="w-4 h-4 opacity-70" alt="" />
+            <span className="text-[11px] text-white/50 font-medium">taskhomie</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => dispatch({ type: "VOICE_EXPAND" })}
+              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              title="Expand to chat"
+            >
+              <Maximize2 size={12} className="text-white/40" />
+            </button>
+            <button
+              onClick={handleDismiss}
+              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              title="Dismiss"
+            >
+              <X size={12} className="text-white/40" />
+            </button>
+          </div>
+        </div>
+
         {/* ambient glow - pulses when running */}
         <motion.div
           className="absolute inset-0 pointer-events-none"
@@ -342,7 +373,7 @@ export default function MainWindow() {
         />
 
         {/* speak text - hero section */}
-        <div className="flex-1 flex items-center justify-center px-6 py-6 min-h-0">
+        <div className="flex-1 flex items-center justify-center px-6 py-4 min-h-0">
           <AnimatePresence mode="wait">
             {speakText ? (
               <motion.p
@@ -403,8 +434,8 @@ export default function MainWindow() {
           </div>
         )}
 
-        {/* subtle status indicator at bottom */}
-        <div className="pb-2 flex justify-center">
+        {/* bottom bar - status + mic */}
+        <div className="px-3 pb-3 flex items-center justify-between">
           <motion.div
             className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/5"
             initial={{ opacity: 0, y: 10 }}
@@ -416,6 +447,24 @@ export default function MainWindow() {
               {isRunning ? "working" : "done"}
             </span>
           </motion.div>
+
+          {/* mic button - hold to talk */}
+          <motion.button
+            onMouseDown={handleMicDown}
+            onMouseUp={handleMicUp}
+            onMouseLeave={handleMicUp}
+            disabled={isRunning}
+            className={`p-2.5 rounded-xl transition-colors ${
+              isRunning
+                ? "bg-white/5 text-white/20 cursor-not-allowed"
+                : "bg-white/10 hover:bg-orange-500/20 text-white/60 hover:text-orange-300"
+            }`}
+            title="Hold to speak"
+            whileHover={isRunning ? {} : { scale: 1.05 }}
+            whileTap={isRunning ? {} : { scale: 0.95 }}
+          >
+            <Mic size={16} />
+          </motion.button>
         </div>
       </motion.div>
     );

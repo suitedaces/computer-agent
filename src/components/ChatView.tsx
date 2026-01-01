@@ -36,7 +36,6 @@ import {
   Eye,
   GripHorizontal,
   Mic,
-  MicOff,
   Settings,
   Volume2,
   Play,
@@ -794,7 +793,6 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // voice state
-  const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState("");
   const [usedVoiceInput, setUsedVoiceInput] = useState(false);
   const [showVoiceConfirm, setShowVoiceConfirm] = useState(false);
@@ -835,7 +833,6 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
     });
 
     const unlistenStopped = listen("voice:stopped", () => {
-      setIsVoiceActive(false);
       setVoiceText("");
       // show confirmation when recording stops (if there's text)
       if (inputTextRef.current.trim()) {
@@ -845,7 +842,6 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
 
     const unlistenError = listen<string>("voice:error", (event) => {
       console.error("[voice] error:", event.payload);
-      setIsVoiceActive(false);
       setVoiceText("");
     });
 
@@ -855,25 +851,6 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
       unlistenError.then((f) => f());
     };
   }, [setInputText]);
-
-  const toggleVoice = async () => {
-    console.log("[voice] toggleVoice called, isVoiceActive:", isVoiceActive);
-    if (isVoiceActive) {
-      console.log("[voice] stopping...");
-      await invoke("stop_voice");
-      setIsVoiceActive(false);
-      setVoiceText("");
-    } else {
-      try {
-        console.log("[voice] starting...");
-        await invoke("start_voice");
-        console.log("[voice] started successfully");
-        setIsVoiceActive(true);
-      } catch (e) {
-        console.error("[voice] failed to start:", e);
-      }
-    }
-  };
 
   // auto-scroll on new messages
   useEffect(() => {
@@ -1132,26 +1109,24 @@ export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSe
             ) : showVoiceConfirm ? null : (
               <div className="glass-card flex items-center gap-2 p-2">
                 <motion.button
-                  onClick={toggleVoice}
+                  onMouseDown={() => invoke("start_ptt", { mode: selectedMode }).catch(console.error)}
+                  onMouseUp={() => invoke("stop_ptt").catch(console.error)}
+                  onMouseLeave={() => invoke("stop_ptt").catch(console.error)}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
-                    isVoiceActive
-                      ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
-                      : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
-                  }`}
-                  title={isVoiceActive ? "Stop recording" : "Start voice input"}
+                  className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors bg-white/5 border border-white/10 text-white/40 hover:text-orange-300 hover:bg-orange-500/20 hover:border-orange-400/30"
+                  title="Hold to speak"
                 >
-                  {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
+                  <Mic size={14} />
                 </motion.button>
                 <textarea
                   ref={inputRef}
                   value={inputText + (voiceText ? (inputText ? " " : "") + voiceText : "")}
                   onChange={(e) => setInputText(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={isVoiceActive ? "listening..." : "what should I do?"}
+                  placeholder="what should I do?"
                   rows={1}
-                  className={`flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden ${isVoiceActive ? "italic" : ""}`}
+                  className="flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden"
                   style={{ height: "24px" }}
                   onInput={(e) => {
                     const target = e.target as HTMLTextAreaElement;

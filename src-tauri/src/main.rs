@@ -378,8 +378,9 @@ mod storage_cmd {
 
 mod voice_cmd {
     use crate::voice::{VoiceSession, PushToTalkSession};
+    use crate::get_screen_info;
     use std::sync::Arc;
-    use tauri::State;
+    use tauri::{State, Manager, Emitter};
 
     pub struct VoiceState {
         pub session: Arc<VoiceSession>,
@@ -430,12 +431,54 @@ mod voice_cmd {
         app_handle: tauri::AppHandle,
         state: State<'_, PttState>,
         screenshot: Option<String>,
+        mode: Option<String>,
     ) -> Result<(), String> {
         println!("[ptt cmd] start_ptt called");
 
-        if let Some(ss) = screenshot {
-            *state.screenshot.lock().unwrap() = Some(ss);
+        let mode_str = mode.unwrap_or_else(|| "computer".to_string());
+
+        // store screenshot and mode
+        if let Some(ss) = &screenshot {
+            *state.screenshot.lock().unwrap() = Some(ss.clone());
         }
+        *state.mode.lock().unwrap() = Some(mode_str.clone());
+
+        // play recording start sound
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("afplay")
+                .arg("/System/Library/Sounds/Tink.aiff")
+                .spawn()
+                .ok();
+        }
+
+        // show voice window centered - must run on main thread
+        #[cfg(target_os = "macos")]
+        {
+            use crate::panels::VOICE_PANEL;
+            use dispatch::Queue;
+            let app_clone = app_handle.clone();
+            Queue::main().exec_sync(move || {
+                if let Some(window) = app_clone.get_webview_window("voice") {
+                    let _ = window.set_size(tauri::LogicalSize::new(300.0, 300.0));
+                    let info = get_screen_info();
+                    let x = ((info.width - 300.0) / 2.0) * info.scale;
+                    let y = ((info.height - 300.0) / 2.0) * info.scale;
+                    let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+                }
+                if let Some(panel) = VOICE_PANEL.get() {
+                    panel.show();
+                }
+            });
+        }
+
+        // emit recording event
+        let _ = app_handle.emit("ptt:recording", serde_json::json!({
+            "recording": true,
+            "screenshot": screenshot,
+            "mode": mode_str,
+            "sessionId": 0
+        }));
 
         let api_key = std::env::var("DEEPGRAM_API_KEY")
             .map_err(|_| "DEEPGRAM_API_KEY not set in .env".to_string())?;
