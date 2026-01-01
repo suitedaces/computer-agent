@@ -121,25 +121,35 @@ impl BrowserClient {
 
     // tool: take_snapshot
     pub async fn take_snapshot(&mut self, verbose: bool) -> Result<String> {
+        println!("[browser] take_snapshot: starting");
+        let start = std::time::Instant::now();
+
         let page = self.selected_page()?;
+        println!("[browser] take_snapshot: got page, calling GetFullAxTree...");
 
         let resp = page
             .execute(GetFullAxTreeParams::builder().build())
             .await
             .context("failed to get a11y tree")?;
+        println!("[browser] take_snapshot: GetFullAxTree returned in {:?}", start.elapsed());
 
         self.snapshot_id += 1;
         self.uid_to_backend_node.clear();
 
         let nodes = resp.result.nodes;
+        println!("[browser] take_snapshot: formatting {} nodes", nodes.len());
         let snapshot_text = format_ax_tree(&nodes, self.snapshot_id, verbose, &mut self.uid_to_backend_node);
+        println!("[browser] take_snapshot: done in {:?}, {} chars", start.elapsed(), snapshot_text.len());
 
         Ok(snapshot_text)
     }
 
     // tool: click
     pub async fn click(&mut self, uid: &str, dbl_click: bool) -> Result<String> {
+        println!("[browser] click: resolving uid {}", uid);
+        let start = std::time::Instant::now();
         let (x, y) = self.resolve_uid_to_point(uid).await?;
+        println!("[browser] click: resolved to ({}, {}) in {:?}", x, y, start.elapsed());
         let page = self.selected_page()?;
 
         // move mouse
@@ -373,21 +383,47 @@ impl BrowserClient {
     }
 
     // tool: wait_for
+    // uses fast JS evaluation instead of heavy a11y tree polling
     pub async fn wait_for(&mut self, text: &str, timeout_ms: u64) -> Result<String> {
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_millis(timeout_ms);
+        let page = self.selected_page()?;
+
+        // js to check if text exists in page
+        let js = format!(
+            r#"document.body && document.body.innerText.includes("{}")"#,
+            text.replace('\\', "\\\\").replace('"', "\\\"")
+        );
 
         loop {
-            let snapshot = self.take_snapshot(false).await?;
-            if snapshot.contains(text) {
-                return Ok(format!("Element with text \"{text}\" found"));
-            }
-
+            // check timeout FIRST
             if start.elapsed() > timeout {
                 return Err(anyhow!("timeout waiting for text: {text}"));
             }
 
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // use JS evaluation - much faster than GetFullAXTree
+            let eval_result = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                page.evaluate(js.clone())
+            ).await;
+
+            match eval_result {
+                Ok(Ok(result)) => {
+                    if let Ok(found) = result.into_value::<bool>() {
+                        if found {
+                            return Ok(format!("Element with text \"{text}\" found"));
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    println!("[browser] wait_for eval error: {e}");
+                }
+                Err(_) => {
+                    println!("[browser] wait_for eval timed out");
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
@@ -983,11 +1019,11 @@ fn format_node(
         attrs.push(r.to_string());
     }
 
-    // name (truncate if very long)
+    // name (truncate if very long, utf-8 safe)
     if let Some(n) = name {
         if !n.is_empty() {
-            let display_name = if n.len() > 200 {
-                format!("{}...", &n[..200])
+            let display_name = if n.chars().count() > 200 {
+                format!("{}...", n.chars().take(200).collect::<String>())
             } else {
                 n.to_string()
             };

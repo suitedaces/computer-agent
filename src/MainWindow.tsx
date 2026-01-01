@@ -109,6 +109,19 @@ export default function MainWindow() {
   const [speakText, setSpeakText] = useState("");
   const [isRunning, setIsRunning] = useState(false);
 
+  // tool messages for voice response mode (must be before any early returns)
+  const messages = useAgentStore((s) => s.messages);
+  const toolMessages = messages.filter(
+    (m) => m.type === "action" || m.type === "bash"
+  ).slice(-5);
+
+  const toolLogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (toolLogRef.current) {
+      toolLogRef.current.scrollTop = toolLogRef.current.scrollHeight;
+    }
+  }, [toolMessages.length]);
+
   // event listeners
   useEffect(() => {
     const listeners = [
@@ -294,7 +307,7 @@ export default function MainWindow() {
     );
   }
 
-  // VOICE RESPONSE MODE - conversational, speak text is the hero
+  // VOICE RESPONSE MODE - conversational, speak text + tool log
   if (state.mode === "voiceResponse") {
     const handleDismiss = () => {
       dispatch({ type: "VOICE_DISMISS" });
@@ -306,7 +319,7 @@ export default function MainWindow() {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="h-full w-full flex flex-col items-center justify-center bg-black/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden relative cursor-pointer select-none"
+        className="h-full w-full flex flex-col bg-black/80 backdrop-blur-2xl rounded-2xl border border-white/10 overflow-hidden relative cursor-pointer select-none"
         onClick={() => dispatch({ type: "VOICE_EXPAND" })}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -328,8 +341,8 @@ export default function MainWindow() {
           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
         />
 
-        {/* speak text - large, centered, hero with dynamic sizing */}
-        <div className="flex-1 flex items-center justify-center px-6 py-8">
+        {/* speak text - hero section */}
+        <div className="flex-1 flex items-center justify-center px-6 py-6 min-h-0">
           <AnimatePresence mode="wait">
             {speakText ? (
               <motion.p
@@ -359,7 +372,7 @@ export default function MainWindow() {
                       animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
                       transition={{ duration: 1.5, repeat: Infinity }}
                     />
-                    <span className="text-white/30 text-xs">thinking...</span>
+                    <span className="text-white/30 text-xs">working...</span>
                   </>
                 ) : (
                   <span className="text-white/20 text-sm">tap to expand</span>
@@ -369,8 +382,29 @@ export default function MainWindow() {
           </AnimatePresence>
         </div>
 
+        {/* tool log - scrollable list at bottom, hide when done */}
+        {isRunning && toolMessages.length > 0 && (
+          <div
+            ref={toolLogRef}
+            className="mx-3 mb-3 max-h-[120px] overflow-y-auto rounded-lg bg-white/5 border border-white/5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {toolMessages.map((msg, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="px-3 py-1.5 text-[11px] text-white/50 border-b border-white/5 last:border-0 flex items-center gap-2"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${msg.pending ? "bg-orange-400 animate-pulse" : "bg-green-400/60"}`} />
+                <span className="truncate">{msg.content}</span>
+              </motion.div>
+            ))}
+          </div>
+        )}
+
         {/* subtle status indicator at bottom */}
-        <div className="absolute bottom-3 left-0 right-0 flex justify-center">
+        <div className="pb-2 flex justify-center">
           <motion.div
             className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/5"
             initial={{ opacity: 0, y: 10 }}
@@ -379,7 +413,7 @@ export default function MainWindow() {
           >
             <Volume2 size={10} className={`text-orange-400/60 ${isRunning ? "animate-pulse" : ""}`} />
             <span className="text-[9px] text-white/30">
-              {isRunning ? "speaking" : "done"}
+              {isRunning ? "working" : "done"}
             </span>
           </motion.div>
         </div>
