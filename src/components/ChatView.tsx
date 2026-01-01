@@ -92,7 +92,7 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
       <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#30363d]">
         <div className="px-2 py-1.5 font-mono flex items-center gap-2">
           <span className="text-[#3fb950] text-[11px] select-none">$</span>
-          <span className={`text-[11px] text-[#e6edf3] break-all flex-1 ${msg.pending ? "sweep-text" : ""}`}>
+          <span className={`text-[11px] text-[#e6edf3] break-all flex-1 select-text ${msg.pending ? "sweep-text" : ""}`}>
             {msg.content}
           </span>
           {msg.pending && <span className="text-[8px] text-[#8b949e] animate-pulse shrink-0">...</span>}
@@ -122,7 +122,7 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <pre className={`px-2 py-1.5 text-[10px] leading-relaxed break-words whitespace-pre-wrap max-h-[120px] overflow-y-auto ${
+                  <pre className={`px-2 py-1.5 text-[10px] leading-relaxed break-words whitespace-pre-wrap max-h-[120px] overflow-y-auto select-text ${
                     isError ? "text-[#f85149]" : "text-[#8b949e]"
                   }`}>
                     {msg.bashOutput}
@@ -241,7 +241,7 @@ function SpeakBubble({ msg }: { msg: ChatMessage }) {
             <Volume2 size={12} className="text-orange-300" />
             <span className="text-[10px] text-white/40">Voice response</span>
           </div>
-          <p className="text-[13px] text-white/80 leading-relaxed">{msg.content}</p>
+          <p className="text-[13px] text-white/80 leading-relaxed select-text">{msg.content}</p>
         </div>
       </div>
     </motion.div>
@@ -444,7 +444,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               <Streamdown isAnimating={false}>{msg.content}</Streamdown>
             </div>
           ) : (
-            <p className={`text-[13px] leading-relaxed break-words ${
+            <p className={`text-[13px] leading-relaxed break-words select-text ${
               isError ? "text-red-400" :
               isAction ? (msg.pending ? "text-white/50 italic" : "text-white/50") :
               "text-white/90"
