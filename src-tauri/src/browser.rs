@@ -293,6 +293,42 @@ impl BrowserClient {
         Ok(format!("Successfully pressed key: {key}"))
     }
 
+    // tool: scroll
+    pub async fn scroll(&mut self, direction: &str, amount: Option<i64>) -> Result<String> {
+        let page = self.selected_page()?;
+        let pixels = amount.unwrap_or(500);
+
+        let (delta_x, delta_y) = match direction.to_lowercase().as_str() {
+            "up" => (0, -pixels),
+            "down" => (0, pixels),
+            "left" => (-pixels, 0),
+            "right" => (pixels, 0),
+            _ => return Err(anyhow!("Invalid scroll direction: {}", direction)),
+        };
+
+        // use CDP Input.dispatchMouseEvent with type=mouseWheel
+        use chromiumoxide::cdp::browser_protocol::input::{
+            DispatchMouseEventParams, DispatchMouseEventType,
+        };
+
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MouseWheel)
+                .x(400)  // center-ish of viewport
+                .y(400)
+                .delta_x(delta_x as f64)
+                .delta_y(delta_y as f64)
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+        // brief wait for scroll to complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        Ok(format!("Scrolled {} by {} pixels", direction, pixels))
+    }
+
     // tool: navigate_page
     pub async fn navigate_page(
         &mut self,
@@ -829,12 +865,52 @@ fn format_ax_tree(
                 &mut node_index,
                 uid_map,
                 verbose,
+                None, // no parent name at root
                 &mut output,
             );
         }
     }
 
     output
+}
+
+// roles that are pure noise - never useful for interaction or reading
+const SKIP_ROLES: &[&str] = &[
+    "InlineTextBox",  // individual text fragments - text already in parent
+    "LineBreak",      // <br> tags
+    "none",           // explicitly hidden
+    "presentation",   // decorative only
+];
+
+// roles that should be collapsed if they have no name (pass children through)
+const COLLAPSE_IF_EMPTY: &[&str] = &[
+    "generic",     // divs - only useful if they have a name
+    "paragraph",   // usually just wraps text
+    "group",       // grouping container
+];
+
+// text-like roles where the name IS the content (don't output if it duplicates parent)
+const TEXT_ROLES: &[&str] = &["StaticText"];
+
+fn get_node_role(node: &AxNode) -> Option<&str> {
+    node.role.as_ref()?.value.as_ref()?.as_str()
+}
+
+fn get_node_name(node: &AxNode) -> Option<&str> {
+    node.name.as_ref()?.value.as_ref()?.as_str()
+}
+
+fn is_focusable(node: &AxNode) -> bool {
+    if let Some(ref props) = node.properties {
+        for prop in props {
+            if matches!(prop.name, AxPropertyName::Focusable) {
+                if let Some(ref val) = prop.value.value {
+                    return val.as_bool() == Some(true);
+                }
+            }
+        }
+    }
+    false
 }
 
 fn format_node(
@@ -846,31 +922,50 @@ fn format_node(
     node_index: &mut u64,
     uid_map: &mut HashMap<String, BackendNodeId>,
     verbose: bool,
+    parent_name: Option<&str>,
     output: &mut String,
 ) {
+    let role = get_node_role(node);
+    let name = get_node_name(node);
+
     // skip ignored nodes unless verbose
     if node.ignored && !verbose {
-        // still process children
-        if let Some(child_ids) = &node.child_ids {
-            for child_id in child_ids {
-                if let Some(child) = node_map.get(child_id.inner()) {
-                    format_node(
-                        child,
-                        children_map,
-                        node_map,
-                        depth,
-                        snapshot_id,
-                        node_index,
-                        uid_map,
-                        verbose,
-                        output,
-                    );
-                }
-            }
-        }
+        process_children(node, children_map, node_map, depth, snapshot_id, node_index, uid_map, verbose, parent_name, output);
         return;
     }
 
+    // skip noise roles entirely (pass children through at same depth)
+    if let Some(r) = role {
+        if SKIP_ROLES.contains(&r) && !verbose {
+            process_children(node, children_map, node_map, depth, snapshot_id, node_index, uid_map, verbose, parent_name, output);
+            return;
+        }
+    }
+
+    // skip StaticText if it just duplicates parent name
+    if let Some(r) = role {
+        if TEXT_ROLES.contains(&r) && !verbose {
+            if let (Some(n), Some(pn)) = (name, parent_name) {
+                if n == pn || pn.contains(n) {
+                    // text duplicates parent - skip entirely
+                    return;
+                }
+            }
+        }
+    }
+
+    // collapse empty containers (no name, not focusable) - pass children through
+    if let Some(r) = role {
+        if COLLAPSE_IF_EMPTY.contains(&r) && !verbose {
+            let has_name = name.map(|n| !n.is_empty()).unwrap_or(false);
+            if !has_name && !is_focusable(node) {
+                process_children(node, children_map, node_map, depth, snapshot_id, node_index, uid_map, verbose, parent_name, output);
+                return;
+            }
+        }
+    }
+
+    // node is visible - assign uid and output it
     let uid = format!("{}_{}", snapshot_id, *node_index);
     *node_index += 1;
 
@@ -884,35 +979,28 @@ fn format_node(
     let mut attrs = vec![format!("uid={uid}")];
 
     // role
-    if let Some(ref role) = node.role {
-        if let Some(ref val) = role.value {
-            if let Some(s) = val.as_str() {
-                if s != "none" {
-                    attrs.push(s.to_string());
-                } else {
-                    attrs.push("ignored".to_string());
-                }
-            }
-        }
+    if let Some(r) = role {
+        attrs.push(r.to_string());
     }
 
-    // name
-    if let Some(ref name) = node.name {
-        if let Some(ref val) = name.value {
-            if let Some(s) = val.as_str() {
-                if !s.is_empty() {
-                    attrs.push(format!("\"{}\"", s.replace('"', "\\\"")));
-                }
-            }
+    // name (truncate if very long)
+    if let Some(n) = name {
+        if !n.is_empty() {
+            let display_name = if n.len() > 200 {
+                format!("{}...", &n[..200])
+            } else {
+                n.to_string()
+            };
+            attrs.push(format!("\"{}\"", display_name.replace('"', "\\\"")));
         }
     }
 
     // properties
     if let Some(ref props) = node.properties {
         for prop in props {
-            let name = &prop.name;
+            let prop_name = &prop.name;
             if let Some(ref val) = prop.value.value {
-                match name {
+                match prop_name {
                     AxPropertyName::Focusable => {
                         if val.as_bool() == Some(true) {
                             attrs.push("focusable".to_string());
@@ -951,7 +1039,22 @@ fn format_node(
 
     output.push_str(&format!("{}{}\n", indent, attrs.join(" ")));
 
-    // recurse to children
+    // recurse to children, passing current name for deduplication
+    process_children(node, children_map, node_map, depth + 1, snapshot_id, node_index, uid_map, verbose, name, output);
+}
+
+fn process_children(
+    node: &AxNode,
+    children_map: &HashMap<String, Vec<&AxNode>>,
+    node_map: &HashMap<String, &AxNode>,
+    depth: usize,
+    snapshot_id: u64,
+    node_index: &mut u64,
+    uid_map: &mut HashMap<String, BackendNodeId>,
+    verbose: bool,
+    parent_name: Option<&str>,
+    output: &mut String,
+) {
     if let Some(child_ids) = &node.child_ids {
         for child_id in child_ids {
             if let Some(child) = node_map.get(child_id.inner()) {
@@ -959,11 +1062,12 @@ fn format_node(
                     child,
                     children_map,
                     node_map,
-                    depth + 1,
+                    depth,
                     snapshot_id,
                     node_index,
                     uid_map,
                     verbose,
+                    parent_name,
                     output,
                 );
             }

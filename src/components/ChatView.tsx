@@ -41,6 +41,8 @@ import {
   Volume2,
   Play,
   Pause,
+  Search,
+  FileText,
 } from "lucide-react";
 import SettingsContent from "./SettingsContent";
 import { invoke } from "@tauri-apps/api/core";
@@ -392,6 +394,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           if (content.includes("dialog")) return <MessageCircle size={14} />;
           if (content.includes("upload")) return <FileUp size={14} />;
           if (content.includes("screenshot")) return <Camera size={14} />;
+          // server-side tools
+          if (content.includes("search")) return <Search size={14} />;
+          if (content.includes("fetch")) return <FileText size={14} />;
           return <Eye size={14} />;
         }
 

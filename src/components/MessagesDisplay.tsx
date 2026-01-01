@@ -28,6 +28,8 @@ import {
   Volume2,
   Play,
   Pause,
+  Search,
+  FileText,
 } from "lucide-react";
 import { createAudioElement } from "../utils/audio";
 

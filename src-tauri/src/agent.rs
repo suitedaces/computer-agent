@@ -393,6 +393,9 @@ impl Agent {
                 ContentBlock::ToolResult { .. } => "tool_result",
                 ContentBlock::Image { .. } => "image",
                 ContentBlock::RedactedThinking { .. } => "redacted_thinking",
+                ContentBlock::ServerToolUse { name, .. } => name.as_str(),
+                ContentBlock::WebSearchToolResult { .. } => "web_search_tool_result",
+                ContentBlock::WebFetchToolResult { .. } => "web_fetch_tool_result",
             }).collect();
             println!("[agent] Response blocks: {:?}", block_types);
 
@@ -700,6 +703,22 @@ impl Agent {
                         }
                     }
 
+                    // server-side tools - anthropic executes these, we just emit for UI
+                    ContentBlock::ServerToolUse { name, input, .. } => {
+                        println!("[agent] Server tool use: {} with input: {:?}", name, input);
+                        self.emit_tool(&app_handle, name, input.clone());
+                    }
+
+                    ContentBlock::WebSearchToolResult { .. } => {
+                        println!("[agent] Web search tool result received");
+                        // results are in the message history, no action needed
+                    }
+
+                    ContentBlock::WebFetchToolResult { .. } => {
+                        println!("[agent] Web fetch tool result received");
+                        // results are in the message history, no action needed
+                    }
+
                     _ => {}
                 }
             }
@@ -861,6 +880,7 @@ const BROWSER_TOOLS: &[&str] = &[
     "fill_form",
     "drag",
     "press_key",
+    "scroll",
     "navigate_page",
     "wait_for",
     "new_page",
@@ -907,6 +927,12 @@ async fn execute_browser_tool(
             let key = input.get("key").and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("key required"))?;
             browser.press_key(key).await
+        }
+        "scroll" => {
+            let direction = input.get("direction").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("direction required"))?;
+            let amount = input.get("amount").and_then(|v| v.as_i64());
+            browser.scroll(direction, amount).await
         }
         "navigate_page" => {
             let nav_type = input.get("type").and_then(|v| v.as_str())

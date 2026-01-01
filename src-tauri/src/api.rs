@@ -9,7 +9,9 @@ use tokio::sync::mpsc;
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 // computer-use-2025-01-24: enables computer_20250124 and bash_20250124 tools
 // interleaved-thinking-2025-05-14: enables extended thinking with tool use for Claude 4 models
-const BETA_HEADER: &str = "computer-use-2025-01-24,interleaved-thinking-2025-05-14";
+// web-fetch-2025-09-10: enables web_fetch_20250910 server tool
+// context-management-2025-06-27: enables context editing (clear_tool_uses, clear_thinking)
+const BETA_HEADER: &str = "computer-use-2025-01-24,interleaved-thinking-2025-05-14,web-fetch-2025-09-10,context-management-2025-06-27";
 const API_VERSION: &str = "2023-06-01";
 
 /// display dimensions sent to claude for coordinate mapping.
@@ -59,6 +61,25 @@ pub enum ContentBlock {
     RedactedThinking {
         data: String,
     },
+    // server-side tool use (web_search, web_fetch) - anthropic executes these
+    #[serde(rename = "server_tool_use")]
+    ServerToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    // web search results from server
+    #[serde(rename = "web_search_tool_result")]
+    WebSearchToolResult {
+        tool_use_id: String,
+        content: serde_json::Value,
+    },
+    // web fetch results from server
+    #[serde(rename = "web_fetch_tool_result")]
+    WebFetchToolResult {
+        tool_use_id: String,
+        content: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +113,11 @@ struct ThinkingConfig {
 }
 
 #[derive(Debug, Serialize)]
+struct ContextManagement {
+    edits: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
 struct ApiRequest {
     model: String,
     max_tokens: u32,
@@ -100,6 +126,7 @@ struct ApiRequest {
     messages: Vec<Message>,
     stream: bool,
     thinking: ThinkingConfig,
+    context_management: ContextManagement,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,6 +196,21 @@ impl AnthropicClient {
             "name": "bash"
         }));
 
+        // web search tool - server-side, anthropic executes
+        tools.push(serde_json::json!({
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 10
+        }));
+
+        // web fetch tool - server-side, anthropic executes
+        tools.push(serde_json::json!({
+            "type": "web_fetch_20250910",
+            "name": "web_fetch",
+            "max_uses": 10,
+            "max_content_tokens": 50000
+        }));
+
         // speak tool for voice mode
         if voice_mode {
             tools.push(serde_json::json!({
@@ -221,6 +263,23 @@ impl AnthropicClient {
                 config_type: "enabled".to_string(),
                 budget_tokens: THINKING_BUDGET,
             },
+            context_management: ContextManagement {
+                edits: vec![
+                    // clear thinking blocks from older turns, keep last 2
+                    serde_json::json!({
+                        "type": "clear_thinking_20251015",
+                        "keep": { "type": "thinking_turns", "value": 2 }
+                    }),
+                    // clear tool results when context exceeds 80k tokens, keep last 5
+                    serde_json::json!({
+                        "type": "clear_tool_uses_20250919",
+                        "trigger": { "type": "input_tokens", "value": 80000 },
+                        "keep": { "type": "tool_uses", "value": 5 },
+                        "clear_at_least": { "type": "input_tokens", "value": 10000 },
+                        "exclude_tools": ["web_search", "web_fetch"]
+                    }),
+                ],
+            },
         };
 
         let response = self
@@ -251,6 +310,7 @@ impl AnthropicClient {
         let mut current_tool_json: Vec<String> = Vec::new();
         let mut tool_info: Vec<(String, String)> = Vec::new(); // (id, name)
         let mut block_types: Vec<String> = Vec::new(); // track block type per index
+        let mut server_tool_content: Vec<serde_json::Value> = Vec::new(); // server tool result content
         let mut buffer = String::new();
 
         // track usage from SSE events
@@ -333,6 +393,23 @@ impl AnthropicClient {
                                     let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
                                     tool_info[index] = (id.clone(), name.clone());
                                     let _ = event_tx.send(StreamEvent::ToolUseStart { name });
+                                } else if block_type == "server_tool_use" {
+                                    // server-side tool (web_search, web_fetch)
+                                    let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                                    let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                                    tool_info[index] = (id.clone(), name.clone());
+                                    let _ = event_tx.send(StreamEvent::ToolUseStart { name });
+                                } else if block_type == "web_search_tool_result" || block_type == "web_fetch_tool_result" {
+                                    // server tool results - store the whole block for later
+                                    let tool_use_id = block.get("tool_use_id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                                    tool_info[index] = (tool_use_id, String::new());
+                                    // store content for later
+                                    while server_tool_content.len() <= index {
+                                        server_tool_content.push(serde_json::json!(null));
+                                    }
+                                    if let Some(content) = block.get("content") {
+                                        server_tool_content[index] = content.clone();
+                                    }
                                 }
                             }
                         }
@@ -438,6 +515,53 @@ impl AnthropicClient {
                                         };
                                         content_blocks.push(ContentBlock::ToolUse { id, name, input });
                                     }
+                                }
+                                "server_tool_use" => {
+                                    // server-side tool - same as tool_use but different ContentBlock type
+                                    let (id, name) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    if !id.is_empty() {
+                                        let json_str = if index < current_tool_json.len() {
+                                            &current_tool_json[index]
+                                        } else {
+                                            ""
+                                        };
+                                        let input: serde_json::Value = if json_str.is_empty() {
+                                            serde_json::json!({})
+                                        } else {
+                                            serde_json::from_str(json_str).unwrap_or(serde_json::json!({}))
+                                        };
+                                        content_blocks.push(ContentBlock::ServerToolUse { id, name, input });
+                                    }
+                                }
+                                "web_search_tool_result" => {
+                                    let (tool_use_id, _) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    let content = if index < server_tool_content.len() {
+                                        server_tool_content[index].clone()
+                                    } else {
+                                        serde_json::json!(null)
+                                    };
+                                    content_blocks.push(ContentBlock::WebSearchToolResult { tool_use_id, content });
+                                }
+                                "web_fetch_tool_result" => {
+                                    let (tool_use_id, _) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    let content = if index < server_tool_content.len() {
+                                        server_tool_content[index].clone()
+                                    } else {
+                                        serde_json::json!(null)
+                                    };
+                                    content_blocks.push(ContentBlock::WebFetchToolResult { tool_use_id, content });
                                 }
                                 _ => {}
                             }
@@ -667,6 +791,18 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
                     "key": { "type": "string", "description": "Key or combo" }
                 },
                 "required": ["key"]
+            }
+        }),
+        serde_json::json!({
+            "name": "scroll",
+            "description": "Scroll the page in a direction",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
+                    "amount": { "type": "number", "description": "Pixels to scroll (default 500)" }
+                },
+                "required": ["direction"]
             }
         }),
         serde_json::json!({
