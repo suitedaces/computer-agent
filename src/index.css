@@ -56,6 +56,12 @@ body {
   user-select: none;
 }
 
+/* allow text selection in message content areas */
+.select-text, .prose, pre, code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* glass card */
 .glass-card {
   background: rgba(255, 255, 255, 0.05);
