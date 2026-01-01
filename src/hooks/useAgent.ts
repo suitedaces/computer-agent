@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useCallback } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { AgentUpdate } from "../types";
-import { queueAudio } from "../utils/audio";
+import { queueAudio, playClickSound, playTypeSound, playDoneSound, playScreenshotSound, startAmbientSound, stopAmbientSound, pauseAmbientSound, resumeAmbientSound, setAudioEndCallback } from "../utils/audio";
 import { formatToolMessage, ToolInput } from "../utils/toolFormat";
 
 type UnlistenFn = () => void;
@@ -12,7 +12,7 @@ const shouldAutoplayAudio = (() => {
   if (typeof window === "undefined") return true;
   const params = new URLSearchParams(window.location.search);
   // only the main window should auto-play to avoid duplicate audio across windows
-  return !params.has("mini") && !params.has("spotlight") && !params.has("border");
+  return !params.has("voice") && !params.has("border");
 })();
 
 let listenersAttached = false;
@@ -38,9 +38,13 @@ function attachListeners() {
         s.setIsRunning(true);
         if (mode === "computer") {
           invoke("set_main_click_through", { ignore: true }).catch(() => {});
-          invoke("set_mini_click_through", { ignore: true }).catch(() => {});
-          invoke("set_spotlight_click_through", { ignore: true }).catch(() => {});
           invoke("show_border_overlay").catch(() => {});
+        }
+        // start ambient sound in voice mode
+        if (s.voiceMode && shouldAutoplayAudio) {
+          startAmbientSound();
+          // resume ambient after TTS finishes
+          setAudioEndCallback(() => resumeAmbientSound());
         }
         break;
 
@@ -69,27 +73,57 @@ function attachListeners() {
             action: formatted.action,
             pending: true,
           });
+
+          // play subtle sounds for actions (computer and browser tools)
+          // in voice mode: still play action sounds, they provide good feedback
+          if (shouldAutoplayAudio) {
+            const action = formatted.action?.action;
+            const content = formatted.content.toLowerCase();
+
+            // click sounds: computer clicks, browser click/hover
+            if (action?.includes("click") || action === "mouse_move" ||
+                tool_name === "click" || tool_name === "hover") {
+              playClickSound();
+            }
+            // type sounds: computer type/key, browser fill
+            else if (action === "type" || action === "key" ||
+                     tool_name === "fill" || tool_name === "fill_form" || tool_name === "press_key") {
+              playTypeSound();
+            }
+            // click sound for navigation actions
+            else if (tool_name === "navigate_page" || content.includes("navigat")) {
+              playClickSound();
+            }
+          }
         }
         break;
 
       case "screenshot":
         s.markLastActionComplete(screenshot);
+        if (shouldAutoplayAudio) {
+          playScreenshotSound();
+        }
         break;
 
       case "finished":
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
-        invoke("set_mini_click_through", { ignore: false }).catch(() => {});
-        invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
+        // clear callback first, then stop ambient
+        setAudioEndCallback(null);
+        stopAmbientSound();
+        // play completion chime (skip in voice mode - TTS is the feedback)
+        if (shouldAutoplayAudio && !s.voiceMode) {
+          playDoneSound();
+        }
         break;
 
       case "error":
         s.setIsRunning(false);
         invoke("set_main_click_through", { ignore: false }).catch(() => {});
-        invoke("set_mini_click_through", { ignore: false }).catch(() => {});
-        invoke("set_spotlight_click_through", { ignore: false }).catch(() => {});
         invoke("hide_border_overlay").catch(() => {});
+        setAudioEndCallback(null);
+        stopAmbientSound();
         s.addMessage({ role: "assistant", content: message, type: "error" });
         break;
 
@@ -98,6 +132,11 @@ function attachListeners() {
         break;
 
       case "browser_result":
+        s.markLastActionComplete();
+        break;
+
+      case "web_result":
+        // server-side web tools (web_search, web_fetch) completed
         s.markLastActionComplete();
         break;
     }
@@ -122,6 +161,8 @@ function attachListeners() {
     console.log("[voice] Speaking:", text.slice(0, 50) + "...");
     store().addMessage({ role: "assistant", content: text, type: "speak", audioData: audio });
     if (shouldAutoplayAudio) {
+      // pause ambient while speaking
+      pauseAmbientSound();
       queueAudio(audio);
     }
   });

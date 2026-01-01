@@ -37,6 +37,12 @@ impl Default for AgentMode {
     }
 }
 
+// result type for browser tools to distinguish image vs text results
+enum BrowserToolResult {
+    Image(String),
+    Text(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentUpdate {
     pub update_type: String,
@@ -393,6 +399,9 @@ impl Agent {
                 ContentBlock::ToolResult { .. } => "tool_result",
                 ContentBlock::Image { .. } => "image",
                 ContentBlock::RedactedThinking { .. } => "redacted_thinking",
+                ContentBlock::ServerToolUse { name, .. } => name.as_str(),
+                ContentBlock::WebSearchToolResult { .. } => "web_search_tool_result",
+                ContentBlock::WebFetchToolResult { .. } => "web_fetch_tool_result",
             }).collect();
             println!("[agent] Response blocks: {:?}", block_types);
 
@@ -584,6 +593,12 @@ impl Agent {
                                 });
                             }
                         } else if is_browser_tool(name) && mode == AgentMode::Browser {
+                            // check if stopped before starting browser tool
+                            if !self.running.load(Ordering::SeqCst) {
+                                println!("[agent] Stopped before browser tool");
+                                break;
+                            }
+
                             // handle browser tools
                             println!("[agent] Calling browser tool: {}", name);
                             // emit tool for TS-side formatting
@@ -592,55 +607,74 @@ impl Agent {
 
                             let mut browser_guard = self.browser_client.lock().await;
                             if let Some(ref mut browser) = *browser_guard {
-                                // screenshot returns image, other tools return text
-                                if name == "screenshot" {
-                                    match browser.screenshot().await {
-                                        Ok(base64_data) => {
-                                            println!("[agent] Browser screenshot captured ({} bytes)", base64_data.len());
-                                            self.emit(&app_handle, "screenshot", "Browser screenshot", None, Some(base64_data.clone()));
-                                            tool_results.push(ContentBlock::ToolResult {
-                                                tool_use_id: id.clone(),
-                                                content: vec![ToolResultContent::Image {
-                                                    source: ImageSource {
-                                                        source_type: "base64".to_string(),
-                                                        media_type: "image/jpeg".to_string(),
-                                                        data: base64_data,
-                                                    },
-                                                }],
-                                            });
+                                // wrap browser operations with a cancellation check
+                                // use tokio::select! to race against stop signal
+                                let running_flag = self.running.clone();
+                                let browser_result: Result<BrowserToolResult, String> = {
+                                    let tool_future = async {
+                                        if name == "screenshot" {
+                                            match browser.screenshot().await {
+                                                Ok(data) => Ok(BrowserToolResult::Image(data)),
+                                                Err(e) => Err(format!("Screenshot error: {}", e)),
+                                            }
+                                        } else {
+                                            match execute_browser_tool(browser, name, input).await {
+                                                Ok(text) => Ok(BrowserToolResult::Text(text)),
+                                                Err(e) => Err(format!("Browser error: {}", e)),
+                                            }
                                         }
-                                        Err(e) => {
-                                            let err_msg = format!("Screenshot error: {}", e);
-                                            println!("[agent] Browser screenshot failed: {}", err_msg);
-                                            self.emit(&app_handle, "browser_result", &err_msg, None, None);
-                                            tool_results.push(ContentBlock::ToolResult {
-                                                tool_use_id: id.clone(),
-                                                content: vec![ToolResultContent::Text { text: err_msg }],
-                                            });
+                                    };
+
+                                    // poll for cancellation every 100ms
+                                    let cancel_check = async {
+                                        loop {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                            if !running_flag.load(Ordering::SeqCst) {
+                                                return;
+                                            }
                                         }
+                                    };
+
+                                    tokio::select! {
+                                        result = tool_future => result,
+                                        _ = cancel_check => Err("Stopped by user".to_string()),
                                     }
-                                } else {
-                                    let result = execute_browser_tool(browser, name, input).await;
-                                    match result {
-                                        Ok(output) => {
-                                            println!("[agent] Browser tool success ({} chars): {}...", output.len(), &output[..output.len().min(200)]);
-                                            self.emit(&app_handle, "browser_result", &output, None, None);
-                                            tool_results.push(ContentBlock::ToolResult {
-                                                tool_use_id: id.clone(),
-                                                content: vec![ToolResultContent::Text { text: output }],
-                                            });
+                                };
+
+                                match browser_result {
+                                    Ok(BrowserToolResult::Image(base64_data)) => {
+                                        println!("[agent] Browser screenshot captured ({} bytes)", base64_data.len());
+                                        self.emit(&app_handle, "screenshot", "Browser screenshot", None, Some(base64_data.clone()));
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Image {
+                                                source: ImageSource {
+                                                    source_type: "base64".to_string(),
+                                                    media_type: "image/jpeg".to_string(),
+                                                    data: base64_data,
+                                                },
+                                            }],
+                                        });
+                                    }
+                                    Ok(BrowserToolResult::Text(output)) => {
+                                        println!("[agent] Browser tool success ({} chars): {}...", output.len(), &output[..output.len().min(200)]);
+                                        self.emit(&app_handle, "browser_result", &output, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: output }],
+                                        });
+                                    }
+                                    Err(err_msg) => {
+                                        println!("[agent] Browser tool failed: {}", err_msg);
+                                        if err_msg == "Stopped by user" {
+                                            // don't add result, just break
+                                            break;
                                         }
-                                        Err(e) => {
-                                            let err_msg = format!("Browser error: {}", e);
-                                            println!("[agent] Browser tool failed: {}", err_msg);
-                                            // emit browser_result not error - tool failures are expected
-                                            // (e.g. wait_for timeouts) and the model handles them gracefully
-                                            self.emit(&app_handle, "browser_result", &err_msg, None, None);
-                                            tool_results.push(ContentBlock::ToolResult {
-                                                tool_use_id: id.clone(),
-                                                content: vec![ToolResultContent::Text { text: err_msg }],
-                                            });
-                                        }
+                                        self.emit(&app_handle, "browser_result", &err_msg, None, None);
+                                        tool_results.push(ContentBlock::ToolResult {
+                                            tool_use_id: id.clone(),
+                                            content: vec![ToolResultContent::Text { text: err_msg }],
+                                        });
                                     }
                                 }
                             } else {
@@ -698,6 +732,25 @@ impl Agent {
                                 }],
                             });
                         }
+                    }
+
+                    // server-side tools - anthropic executes these, we just emit for UI
+                    ContentBlock::ServerToolUse { name, input, .. } => {
+                        println!("[agent] Server tool use: {} with input: {:?}", name, input);
+                        self.emit_tool(&app_handle, name, input.clone());
+                    }
+
+                    ContentBlock::WebSearchToolResult { .. } => {
+                        println!("[agent] Web search tool result received");
+                        // emit to clear pending state in UI
+                        self.emit(&app_handle, "web_result", "Web search complete", None, None);
+                    }
+
+                    ContentBlock::WebFetchToolResult { .. } => {
+                        println!("[agent] Web fetch tool result received");
+                        // emit to clear pending state in UI
+                        self.emit(&app_handle, "web_result", "Web fetch complete", None, None);
+                        // results are in the message history, no action needed
                     }
 
                     _ => {}
@@ -861,6 +914,7 @@ const BROWSER_TOOLS: &[&str] = &[
     "fill_form",
     "drag",
     "press_key",
+    "scroll",
     "navigate_page",
     "wait_for",
     "new_page",
@@ -907,6 +961,12 @@ async fn execute_browser_tool(
             let key = input.get("key").and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("key required"))?;
             browser.press_key(key).await
+        }
+        "scroll" => {
+            let direction = input.get("direction").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("direction required"))?;
+            let amount = input.get("amount").and_then(|v| v.as_i64());
+            browser.scroll(direction, amount).await
         }
         "navigate_page" => {
             let nav_type = input.get("type").and_then(|v| v.as_str())

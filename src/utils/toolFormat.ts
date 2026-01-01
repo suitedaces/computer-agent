@@ -23,6 +23,8 @@ export interface ToolInput {
   dblClick?: boolean;
   pageIdx?: number;
   verbose?: boolean;
+  // web search/fetch tools (server-side)
+  query?: string;
 }
 
 interface FormatOptions {
@@ -50,6 +52,33 @@ export function formatToolMessage(
         content: String(input.text || ""),
         type: "speak",
       };
+    case "web_search": {
+      const query = input.query;
+      if (query) {
+        const preview = query.length > 40 ? `${query.slice(0, 40)}...` : query;
+        return {
+          content: `${pending ? "Searching" : "Searched"}: "${preview}"`,
+          type: "action",
+        };
+      }
+      return {
+        content: pending ? "Searching the web" : "Searched the web",
+        type: "action",
+      };
+    }
+    case "web_fetch": {
+      const url = input.url;
+      if (url) {
+        return {
+          content: `${pending ? "Fetching" : "Fetched"} ||${url}||`,
+          type: "action",
+        };
+      }
+      return {
+        content: pending ? "Fetching page" : "Fetched page",
+        type: "action",
+      };
+    }
     default:
       // browser tools and unknown
       return {

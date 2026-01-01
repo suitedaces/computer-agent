@@ -9,7 +9,9 @@ use tokio::sync::mpsc;
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 // computer-use-2025-01-24: enables computer_20250124 and bash_20250124 tools
 // interleaved-thinking-2025-05-14: enables extended thinking with tool use for Claude 4 models
-const BETA_HEADER: &str = "computer-use-2025-01-24,interleaved-thinking-2025-05-14";
+// web-fetch-2025-09-10: enables web_fetch_20250910 server tool
+// context-management-2025-06-27: enables context editing (clear_tool_uses, clear_thinking)
+const BETA_HEADER: &str = "computer-use-2025-01-24,interleaved-thinking-2025-05-14,web-fetch-2025-09-10,context-management-2025-06-27";
 const API_VERSION: &str = "2023-06-01";
 
 /// display dimensions sent to claude for coordinate mapping.
@@ -59,6 +61,25 @@ pub enum ContentBlock {
     RedactedThinking {
         data: String,
     },
+    // server-side tool use (web_search, web_fetch) - anthropic executes these
+    #[serde(rename = "server_tool_use")]
+    ServerToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    // web search results from server
+    #[serde(rename = "web_search_tool_result")]
+    WebSearchToolResult {
+        tool_use_id: String,
+        content: serde_json::Value,
+    },
+    // web fetch results from server
+    #[serde(rename = "web_fetch_tool_result")]
+    WebFetchToolResult {
+        tool_use_id: String,
+        content: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +113,11 @@ struct ThinkingConfig {
 }
 
 #[derive(Debug, Serialize)]
+struct ContextManagement {
+    edits: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
 struct ApiRequest {
     model: String,
     max_tokens: u32,
@@ -100,6 +126,7 @@ struct ApiRequest {
     messages: Vec<Message>,
     stream: bool,
     thinking: ThinkingConfig,
+    context_management: ContextManagement,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,6 +196,21 @@ impl AnthropicClient {
             "name": "bash"
         }));
 
+        // web search tool - server-side, anthropic executes
+        tools.push(serde_json::json!({
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 10
+        }));
+
+        // web fetch tool - server-side, anthropic executes
+        tools.push(serde_json::json!({
+            "type": "web_fetch_20250910",
+            "name": "web_fetch",
+            "max_uses": 10,
+            "max_content_tokens": 50000
+        }));
+
         // speak tool for voice mode
         if voice_mode {
             tools.push(serde_json::json!({
@@ -202,14 +244,17 @@ impl AnthropicClient {
             AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
         };
 
-        // only append voice instructions when voice mode is enabled (speak tool available)
+        // append model-specific voice instructions when voice mode is enabled
         if voice_mode {
-            system.push_str(VOICE_SYSTEM_PROMPT_APPEND);
+            if self.model.contains("haiku") {
+                system.push_str(VOICE_PROMPT_HAIKU);
+            } else {
+                system.push_str(VOICE_PROMPT_OPUS);
+            }
         }
 
         let tools = self.build_tools(mode, voice_mode);
         println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
-        println!("[api] Tools JSON: {}", serde_json::to_string_pretty(&tools).unwrap_or_default());
 
         let request = ApiRequest {
             model: self.model.clone(),
@@ -221,6 +266,23 @@ impl AnthropicClient {
             thinking: ThinkingConfig {
                 config_type: "enabled".to_string(),
                 budget_tokens: THINKING_BUDGET,
+            },
+            context_management: ContextManagement {
+                edits: vec![
+                    // clear thinking blocks from older turns, keep last 2
+                    serde_json::json!({
+                        "type": "clear_thinking_20251015",
+                        "keep": { "type": "thinking_turns", "value": 2 }
+                    }),
+                    // clear tool results when context exceeds 80k tokens, keep last 5
+                    serde_json::json!({
+                        "type": "clear_tool_uses_20250919",
+                        "trigger": { "type": "input_tokens", "value": 80000 },
+                        "keep": { "type": "tool_uses", "value": 5 },
+                        "clear_at_least": { "type": "input_tokens", "value": 10000 },
+                        "exclude_tools": ["web_search", "web_fetch"]
+                    }),
+                ],
             },
         };
 
@@ -252,6 +314,7 @@ impl AnthropicClient {
         let mut current_tool_json: Vec<String> = Vec::new();
         let mut tool_info: Vec<(String, String)> = Vec::new(); // (id, name)
         let mut block_types: Vec<String> = Vec::new(); // track block type per index
+        let mut server_tool_content: Vec<serde_json::Value> = Vec::new(); // server tool result content
         let mut buffer = String::new();
 
         // track usage from SSE events
@@ -334,6 +397,23 @@ impl AnthropicClient {
                                     let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
                                     tool_info[index] = (id.clone(), name.clone());
                                     let _ = event_tx.send(StreamEvent::ToolUseStart { name });
+                                } else if block_type == "server_tool_use" {
+                                    // server-side tool (web_search, web_fetch)
+                                    let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                                    let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                                    tool_info[index] = (id.clone(), name.clone());
+                                    let _ = event_tx.send(StreamEvent::ToolUseStart { name });
+                                } else if block_type == "web_search_tool_result" || block_type == "web_fetch_tool_result" {
+                                    // server tool results - store the whole block for later
+                                    let tool_use_id = block.get("tool_use_id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                                    tool_info[index] = (tool_use_id, String::new());
+                                    // store content for later
+                                    while server_tool_content.len() <= index {
+                                        server_tool_content.push(serde_json::json!(null));
+                                    }
+                                    if let Some(content) = block.get("content") {
+                                        server_tool_content[index] = content.clone();
+                                    }
                                 }
                             }
                         }
@@ -439,6 +519,53 @@ impl AnthropicClient {
                                         };
                                         content_blocks.push(ContentBlock::ToolUse { id, name, input });
                                     }
+                                }
+                                "server_tool_use" => {
+                                    // server-side tool - same as tool_use but different ContentBlock type
+                                    let (id, name) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    if !id.is_empty() {
+                                        let json_str = if index < current_tool_json.len() {
+                                            &current_tool_json[index]
+                                        } else {
+                                            ""
+                                        };
+                                        let input: serde_json::Value = if json_str.is_empty() {
+                                            serde_json::json!({})
+                                        } else {
+                                            serde_json::from_str(json_str).unwrap_or(serde_json::json!({}))
+                                        };
+                                        content_blocks.push(ContentBlock::ServerToolUse { id, name, input });
+                                    }
+                                }
+                                "web_search_tool_result" => {
+                                    let (tool_use_id, _) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    let content = if index < server_tool_content.len() {
+                                        server_tool_content[index].clone()
+                                    } else {
+                                        serde_json::json!(null)
+                                    };
+                                    content_blocks.push(ContentBlock::WebSearchToolResult { tool_use_id, content });
+                                }
+                                "web_fetch_tool_result" => {
+                                    let (tool_use_id, _) = if index < tool_info.len() {
+                                        tool_info[index].clone()
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+                                    let content = if index < server_tool_content.len() {
+                                        server_tool_content[index].clone()
+                                    } else {
+                                        serde_json::json!(null)
+                                    };
+                                    content_blocks.push(ContentBlock::WebFetchToolResult { tool_use_id, content });
                                 }
                                 _ => {}
                             }
@@ -558,27 +685,48 @@ If browser tools fail with connection errors, Chrome may have been closed. Run t
 open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/.taskhomie-chrome" --profile-directory=Default --no-first-run
 Then wait a few seconds and retry the browser tool."#;
 
-const VOICE_SYSTEM_PROMPT_APPEND: &str = r#"
+// voice prompt for opus/sonnet - lighter touch, they follow instructions well
+const VOICE_PROMPT_OPUS: &str = r#"
 
-<voice_mode_instructions>
-When you see user messages wrapped in <voice_input> tags, the user spoke to you and can only hear your response via the speak tool. They cannot see any text you output.
+You MUST call tools on every single turn. Never respond with just text - always take action.
 
-CRITICAL: You MUST call speak() frequently - at least every 2-3 tool calls. NEVER leave the user hanging in silence. Call speak() at the start to tell the user what you're doing, give progress updates every few actions, and call it at the end with your conclusion. Without speak(), the user hears nothing and thinks you are stuck or broken.
+CRITICAL: ALWAYS call speak() FIRST to tell the user what you're about to do. Keep them in the loop constantly.
 
-Output behavior:
-- Keep text blocks EXTREMELY short - just a few words for your own notes. The user never sees them.
-- speak() is the only way the user hears from you. Without it, you are silent.
-- Call speak() for all responses, confirmations, questions, errors, and status updates.
+Example multi-step task (user asks to play a song on spotify):
+Turn 1: [speak: "Opening Spotify and searching for that song"] [bash: open -a "Spotify"]
+Turn 2: [computer: click search] [computer: type song name]
+Turn 3: [speak: "Found it, playing now"] [computer: click play button]
 
-Speech style:
-- Conversational and concise (1-3 sentences per call)
-- Natural spoken language - say "two hundred" not "200", spell out abbreviations
-- No markdown, code blocks, URLs, or formatting - just words
+Call speak() at the START, then every 2-3 tool calls for progress updates, and at the END. The user is BLIND to your text - speak() is your ONLY way to communicate.
 
-Continue working after speaking - don't wait for acknowledgment. The user will interrupt if needed.
+Parallel tools: If multiple independent actions exist, call them all simultaneously in one response.
 
-START BY CALLING speak() NOW to tell the user what you're about to do. THEN CALL speak() EVERY 2-3 TOOL CALLS TO KEEP THEM UPDATED.
-</voice_mode_instructions>"#;
+Speech style: Conversational, 1-3 sentences. Say "two hundred" not "200". No markdown or URLs."#;
+
+// voice prompt for haiku - needs stronger, more explicit guidance
+const VOICE_PROMPT_HAIKU: &str = r#"
+
+<MANDATORY_TOOL_USE>
+You MUST call at least one tool on EVERY turn. Text-only responses are FORBIDDEN.
+</MANDATORY_TOOL_USE>
+
+<VOICE_MODE>
+CRITICAL: ALWAYS call speak() FIRST before any other tool. The user cannot see your text - speak() is your ONLY communication channel.
+
+Example multi-step task (user asks to play a song on spotify):
+Turn 1: [speak: "Opening Spotify and searching for that song"] [bash: open -a "Spotify"]
+Turn 2: [computer: click search] [computer: type song name]
+Turn 3: [speak: "Found it, playing now"] [computer: click play button]
+
+Call speak() at the START, then every 2-3 tool calls for progress updates, and at the END.
+Keep spoken responses 1-2 sentences.
+</VOICE_MODE>
+
+<PARALLEL_EXECUTION>
+When multiple independent actions are possible, call ALL tools in parallel in a single response.
+</PARALLEL_EXECUTION>
+
+Speech style: Conversational. Say "two hundred" not "200". No markdown or URLs."#;
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
@@ -668,6 +816,18 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
                     "key": { "type": "string", "description": "Key or combo" }
                 },
                 "required": ["key"]
+            }
+        }),
+        serde_json::json!({
+            "name": "scroll",
+            "description": "Scroll the page in a direction",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
+                    "amount": { "type": "number", "description": "Pixels to scroll (default 500)" }
+                },
+                "required": ["direction"]
             }
         }),
         serde_json::json!({

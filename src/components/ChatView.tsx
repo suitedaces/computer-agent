@@ -36,11 +36,12 @@ import {
   Eye,
   GripHorizontal,
   Mic,
-  MicOff,
   Settings,
   Volume2,
   Play,
   Pause,
+  Search,
+  FileText,
 } from "lucide-react";
 import SettingsContent from "./SettingsContent";
 import { invoke } from "@tauri-apps/api/core";
@@ -70,7 +71,10 @@ function UrlLink({ url }: { url: string }) {
   );
 }
 interface ChatViewProps {
-  variant: "sidebar" | "spotlight" | "mini";
+  variant: "sidebar" | "spotlight" | "mini" | "compact";
+  settingsOpen?: boolean;
+  onSettingsClose?: () => void;
+  onCollapse?: () => void;
 }
 
 function BashBlock({ msg }: { msg: ChatMessage }) {
@@ -87,7 +91,7 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
       <div className="rounded-md overflow-hidden bg-[#0d1117] border border-[#30363d]">
         <div className="px-2 py-1.5 font-mono flex items-center gap-2">
           <span className="text-[#3fb950] text-[11px] select-none">$</span>
-          <span className={`text-[11px] text-[#e6edf3] break-all flex-1 ${msg.pending ? "sweep-text" : ""}`}>
+          <span className={`text-[11px] text-[#e6edf3] break-all flex-1 select-text ${msg.pending ? "sweep-text" : ""}`}>
             {msg.content}
           </span>
           {msg.pending && <span className="text-[8px] text-[#8b949e] animate-pulse shrink-0">...</span>}
@@ -117,7 +121,7 @@ function BashBlock({ msg }: { msg: ChatMessage }) {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <pre className={`px-2 py-1.5 text-[10px] leading-relaxed break-words whitespace-pre-wrap max-h-[120px] overflow-y-auto ${
+                  <pre className={`px-2 py-1.5 text-[10px] leading-relaxed break-words whitespace-pre-wrap max-h-[120px] overflow-y-auto select-text ${
                     isError ? "text-[#f85149]" : "text-[#8b949e]"
                   }`}>
                     {msg.bashOutput}
@@ -236,7 +240,7 @@ function SpeakBubble({ msg }: { msg: ChatMessage }) {
             <Volume2 size={12} className="text-orange-300" />
             <span className="text-[10px] text-white/40">Voice response</span>
           </div>
-          <p className="text-[13px] text-white/80 leading-relaxed">{msg.content}</p>
+          <p className="text-[13px] text-white/80 leading-relaxed select-text">{msg.content}</p>
         </div>
       </div>
     </motion.div>
@@ -389,6 +393,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           if (content.includes("dialog")) return <MessageCircle size={14} />;
           if (content.includes("upload")) return <FileUp size={14} />;
           if (content.includes("screenshot")) return <Camera size={14} />;
+          // server-side tools
+          if (content.includes("search")) return <Search size={14} />;
+          if (content.includes("fetch")) return <FileText size={14} />;
           return <Eye size={14} />;
         }
 
@@ -436,7 +443,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               <Streamdown isAnimating={false}>{msg.content}</Streamdown>
             </div>
           ) : (
-            <p className={`text-[13px] leading-relaxed break-words ${
+            <p className={`text-[13px] leading-relaxed break-words select-text ${
               isError ? "text-red-400" :
               isAction ? (msg.pending ? "text-white/50 italic" : "text-white/50") :
               "text-white/90"
@@ -778,7 +785,7 @@ function StreamingBubble() {
   );
 }
 
-export default function ChatView({ variant }: ChatViewProps) {
+export default function ChatView({ variant, settingsOpen: propSettingsOpen, onSettingsClose, onCollapse }: ChatViewProps) {
   const { messages, isRunning, inputText, setInputText, selectedModel, setSelectedModel, selectedMode, setSelectedMode, streamingText, streamingThinking, clearMessages, setMessages, setVoiceMode, setConversationId } = useAgentStore();
   const { submit } = useAgent();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -786,20 +793,26 @@ export default function ChatView({ variant }: ChatViewProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // voice state
-  const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState("");
   const [usedVoiceInput, setUsedVoiceInput] = useState(false);
   const [showVoiceConfirm, setShowVoiceConfirm] = useState(false);
+  const [isPttActive, setIsPttActive] = useState(false);
 
-  // settings panel state
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // settings panel state - use prop if provided (compact mode), otherwise internal state
+  const [internalSettingsOpen, setInternalSettingsOpen] = useState(false);
+  const settingsOpen = propSettingsOpen ?? internalSettingsOpen;
+  const setSettingsOpen = onSettingsClose
+    ? (open: boolean) => { if (!open) onSettingsClose(); }
+    : setInternalSettingsOpen;
 
   const isSpotlight = variant === "spotlight";
   const isMini = variant === "mini";
-  const panelClass = isMini ? "mini-panel" : isSpotlight ? "spotlight-panel" : "app-panel";
-  const padding = isMini ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
-  const inputPadding = isMini ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
-  const gifSize = isMini ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
+  const isCompact = variant === "compact";
+  const hideHeader = isMini; // only hide for mini, compact gets the full header
+  const panelClass = isMini ? "mini-panel" : isCompact ? "" : isSpotlight ? "spotlight-panel" : "app-panel";
+  const padding = isMini || isCompact ? "px-2 py-2" : isSpotlight ? "px-4 py-4" : "px-3 py-3";
+  const inputPadding = isMini || isCompact ? "p-2 pt-0" : isSpotlight ? "p-4 pt-0" : "p-3 pt-0";
+  const gifSize = isMini || isCompact ? "w-[16rem]" : isSpotlight ? "w-[32rem]" : "w-[28rem]";
 
   // ref to track current input for voice append
   const inputTextRef = useRef(inputText);
@@ -821,7 +834,6 @@ export default function ChatView({ variant }: ChatViewProps) {
     });
 
     const unlistenStopped = listen("voice:stopped", () => {
-      setIsVoiceActive(false);
       setVoiceText("");
       // show confirmation when recording stops (if there's text)
       if (inputTextRef.current.trim()) {
@@ -831,7 +843,6 @@ export default function ChatView({ variant }: ChatViewProps) {
 
     const unlistenError = listen<string>("voice:error", (event) => {
       console.error("[voice] error:", event.payload);
-      setIsVoiceActive(false);
       setVoiceText("");
     });
 
@@ -841,25 +852,6 @@ export default function ChatView({ variant }: ChatViewProps) {
       unlistenError.then((f) => f());
     };
   }, [setInputText]);
-
-  const toggleVoice = async () => {
-    console.log("[voice] toggleVoice called, isVoiceActive:", isVoiceActive);
-    if (isVoiceActive) {
-      console.log("[voice] stopping...");
-      await invoke("stop_voice");
-      setIsVoiceActive(false);
-      setVoiceText("");
-    } else {
-      try {
-        console.log("[voice] starting...");
-        await invoke("start_voice");
-        console.log("[voice] started successfully");
-        setIsVoiceActive(true);
-      } catch (e) {
-        console.error("[voice] failed to start:", e);
-      }
-    }
-  };
 
   // auto-scroll on new messages
   useEffect(() => {
@@ -921,12 +913,25 @@ export default function ChatView({ variant }: ChatViewProps) {
   };
 
   const handleToggleView = () => {
+    // toggle view not applicable for compact mode
+    if (isCompact) return;
     if (isSpotlight) {
       invoke("hide_spotlight_window");
       invoke("show_main_window");
     } else {
       invoke("hide_main_window");
       invoke("show_spotlight_window");
+    }
+  };
+
+  const handleCollapse = () => {
+    if (onCollapse) {
+      onCollapse();
+    } else if (isSpotlight) {
+      invoke("hide_spotlight_window");
+      invoke("minimize_to_mini");
+    } else {
+      invoke("minimize_to_mini");
     }
   };
 
@@ -937,9 +942,9 @@ export default function ChatView({ variant }: ChatViewProps) {
       transition={{ duration: 0.12, ease: "easeOut" }}
       className={`h-screen flex flex-col ${panelClass} overflow-hidden`}
     >
-      {/* titlebar - hidden for mini */}
-      {!isMini && (
-        <div className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
+      {/* titlebar - hidden for mini, draggable for compact */}
+      {!hideHeader && (
+        <div data-tauri-drag-region className="titlebar h-11 flex items-center justify-between px-3 border-b border-white/5 shrink-0">
           {settingsOpen ? (
             <>
               <button
@@ -950,18 +955,17 @@ export default function ChatView({ variant }: ChatViewProps) {
                 <span>Settings</span>
               </button>
               <div className="flex items-center gap-2">
+                {!isCompact && (
+                  <button
+                    onClick={handleToggleView}
+                    className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+                    title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
+                  >
+                    {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  </button>
+                )}
                 <button
-                  onClick={handleToggleView}
-                  className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
-                  title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
-                >
-                  {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
-                <button
-                  onClick={() => {
-                    if (isSpotlight) invoke("hide_spotlight_window");
-                    invoke("minimize_to_mini");
-                  }}
+                  onClick={handleCollapse}
                   className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                   title="Collapse"
                 >
@@ -1002,18 +1006,17 @@ export default function ChatView({ variant }: ChatViewProps) {
                 >
                   <Settings size={14} />
                 </button>
+                {!isCompact && (
+                  <button
+                    onClick={handleToggleView}
+                    className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
+                    title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
+                  >
+                    {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  </button>
+                )}
                 <button
-                  onClick={handleToggleView}
-                  className="w-7 h-7 flex items-center justify-center rounded-md text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors"
-                  title={isSpotlight ? "Switch to sidebar" : "Switch to spotlight"}
-                >
-                  {isSpotlight ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
-                <button
-                  onClick={() => {
-                    if (isSpotlight) invoke("hide_spotlight_window");
-                    invoke("minimize_to_mini");
-                  }}
+                  onClick={handleCollapse}
                   className="w-7 h-7 flex items-center justify-center rounded-md text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                   title="Collapse"
                 >
@@ -1107,26 +1110,37 @@ export default function ChatView({ variant }: ChatViewProps) {
             ) : showVoiceConfirm ? null : (
               <div className="glass-card flex items-center gap-2 p-2">
                 <motion.button
-                  onClick={toggleVoice}
+                  onMouseDown={() => {
+                    setIsPttActive(true);
+                    invoke("start_ptt", { mode: selectedMode }).catch(console.error);
+                  }}
+                  onMouseUp={() => {
+                    if (isPttActive) {
+                      setIsPttActive(false);
+                      invoke("stop_ptt").catch(console.error);
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (isPttActive) {
+                      setIsPttActive(false);
+                      invoke("stop_ptt").catch(console.error);
+                    }
+                  }}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
-                    isVoiceActive
-                      ? "bg-red-500/30 border border-red-400/30 text-red-300 animate-pulse"
-                      : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
-                  }`}
-                  title={isVoiceActive ? "Stop recording" : "Start voice input"}
+                  className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors bg-white/5 border border-white/10 text-white/40 hover:text-orange-300 hover:bg-orange-500/20 hover:border-orange-400/30"
+                  title="Hold to speak"
                 >
-                  {isVoiceActive ? <MicOff size={14} /> : <Mic size={14} />}
+                  <Mic size={14} />
                 </motion.button>
                 <textarea
                   ref={inputRef}
                   value={inputText + (voiceText ? (inputText ? " " : "") + voiceText : "")}
                   onChange={(e) => setInputText(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={isVoiceActive ? "listening..." : "what should I do?"}
+                  placeholder="what should I do?"
                   rows={1}
-                  className={`flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden ${isVoiceActive ? "italic" : ""}`}
+                  className="flex-1 bg-transparent text-white text-[13px] placeholder-white/30 resize-none focus:outline-none min-h-[24px] max-h-[100px] py-1 px-1 overflow-hidden"
                   style={{ height: "24px" }}
                   onInput={(e) => {
                     const target = e.target as HTMLTextAreaElement;

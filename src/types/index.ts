@@ -1,5 +1,5 @@
 export interface AgentUpdate {
-  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result" | "user_message" | "browser_result" | "tool";
+  update_type: "started" | "thinking" | "response" | "action" | "screenshot" | "finished" | "error" | "bash_result" | "user_message" | "browser_result" | "web_result" | "tool";
   message: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
