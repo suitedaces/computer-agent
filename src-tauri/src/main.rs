@@ -521,32 +521,7 @@ mod voice_cmd {
             return Ok(());
         }
 
-        // rewrite transcription to clean up speech artifacts
-        let text = if !raw_text.trim().is_empty() {
-            match std::env::var("ANTHROPIC_API_KEY") {
-                Ok(api_key) => {
-                    println!("[ptt cmd] rewriting transcription...");
-                    match crate::api::rewrite_transcription(&api_key, &raw_text).await {
-                        Ok(rewritten) => {
-                            println!("[ptt cmd] rewritten: '{}' -> '{}'", raw_text, rewritten);
-                            rewritten
-                        }
-                        Err(e) => {
-                            println!("[ptt cmd] rewrite failed: {}, using raw", e);
-                            raw_text
-                        }
-                    }
-                }
-                Err(_) => {
-                    println!("[ptt cmd] no ANTHROPIC_API_KEY, skipping rewrite");
-                    raw_text
-                }
-            }
-        } else {
-            raw_text
-        };
-
-        println!("[ptt cmd] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
+        println!("[ptt cmd] result: text='{}', screenshot={}, mode={:?}, session={}", raw_text, screenshot.is_some(), mode, result_session_id);
 
         // emit recording stopped
         let _ = app_handle.emit("ptt:recording", serde_json::json!({
@@ -556,7 +531,7 @@ mod voice_cmd {
 
         // emit result - frontend handles voice window visibility
         let _ = app_handle.emit("ptt:result", serde_json::json!({
-            "text": text,
+            "text": raw_text,
             "screenshot": screenshot,
             "mode": mode,
             "sessionId": result_session_id
@@ -720,34 +695,7 @@ fn main() {
                                             return;
                                         }
 
-                                        // rewrite transcription to clean up speech artifacts
-                                        let text = if !raw_text.trim().is_empty() {
-                                            match std::env::var("ANTHROPIC_API_KEY") {
-                                                Ok(api_key) => {
-                                                    println!("[ptt] rewriting transcription...");
-                                                    match crate::api::rewrite_transcription(&api_key, &raw_text).await {
-                                                        Ok(rewritten) => {
-                                                            println!("[ptt] rewritten: '{}' -> '{}'", raw_text, rewritten);
-                                                            rewritten
-                                                        }
-                                                        Err(e) => {
-                                                            println!("[ptt] rewrite failed: {}, using raw", e);
-                                                            raw_text
-                                                        }
-                                                    }
-                                                }
-                                                Err(_) => {
-                                                    println!("[ptt] no ANTHROPIC_API_KEY, skipping rewrite");
-                                                    raw_text
-                                                }
-                                            }
-                                        } else {
-                                            raw_text
-                                        };
-
-                                        println!("[ptt] result: text='{}', screenshot={}, mode={:?}, session={}", text, screenshot.is_some(), mode, result_session_id);
-
-                                        // frontend handles voice window visibility via responding mode
+                                        println!("[ptt] result: text='{}', screenshot={}, mode={:?}, session={}", raw_text, screenshot.is_some(), mode, result_session_id);
 
                                         let _ = app_clone.emit("ptt:recording", serde_json::json!({
                                             "recording": false,
@@ -755,7 +703,7 @@ fn main() {
                                         }));
 
                                         let _ = app_clone.emit("ptt:result", serde_json::json!({
-                                            "text": text,
+                                            "text": raw_text,
                                             "screenshot": screenshot,
                                             "mode": mode,
                                             "sessionId": result_session_id

@@ -202,6 +202,7 @@ function LoadingSkeleton() {
 const VOICE_PRESETS = [
   { id: "NOpBlnGInO9m6vDvFkFC", name: "Southern Grandpa" },
   { id: "PB6BdkFkZLbI39GHdnbQ", name: "$eX¥" },
+  { id: "4O1sYUnmtThcBoSBrri7", name: "Maya" },
 ];
 
 const DEFAULT_VOICE_ID = "NOpBlnGInO9m6vDvFkFC";
