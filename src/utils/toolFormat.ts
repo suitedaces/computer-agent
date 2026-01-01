@@ -14,15 +14,43 @@ export interface ToolInput {
   // bash tool
   command?: string;
   // speak tool (text reused)
-  // browser tools
+  // consolidated browser tools (see_page, page_action, browser_navigate)
+  // see_page
+  screenshot?: boolean;
+  list_tabs?: boolean;
+  // page_action
+  click?: string;
+  double_click?: string;
+  type_into?: string;
+  hover?: string;
+  drag_from_to?: string[];
+  press_key?: string;
+  scroll?: string;
+  scroll_pixels?: number;
+  fill_form?: Array<{ element: string; text: string }>;
+  dialog?: string;
+  dialog_text?: string;
+  // browser_navigate
+  go_to_url?: string;
+  go_back?: boolean;
+  go_forward?: boolean;
+  reload?: boolean;
+  reload_skip_cache?: boolean;
+  open_new_tab?: string;
+  switch_to_tab?: number;
+  close_tab?: number;
+  wait_for_text?: string;
+  wait_timeout_ms?: number;
+  // legacy browser tools (for backwards compat with old conversations)
   uid?: string;
   value?: string;
   key?: string;
   url?: string;
-  type?: string; // navigate_page type
+  type?: string;
   dblClick?: boolean;
   pageIdx?: number;
   verbose?: boolean;
+  direction?: string; // legacy scroll direction
   // web search/fetch tools (server-side)
   query?: string;
 }
@@ -171,8 +199,90 @@ function formatComputerTool(
 
 function formatBrowserTool(name: string, input: ToolInput, pending: boolean): string {
   switch (name) {
+    // consolidated browser tools
+    case "see_page": {
+      if (input.screenshot) {
+        return pending ? "Taking screenshot" : "Took screenshot";
+      }
+      if (input.list_tabs) {
+        return pending ? "Listing tabs" : "Listed tabs";
+      }
+      return pending ? "Getting page elements" : "Got page elements";
+    }
+
+    case "page_action": {
+      if (input.click) {
+        return pending ? "Clicking" : "Clicked";
+      }
+      if (input.double_click) {
+        return pending ? "Double clicking" : "Double clicked";
+      }
+      if (input.type_into) {
+        const text = input.text;
+        if (text) {
+          const preview = text.length > 20 ? `${text.slice(0, 20)}...` : text;
+          return `${pending ? "Typing" : "Typed"}: "${preview}"`;
+        }
+        return pending ? "Typing" : "Typed";
+      }
+      if (input.hover) {
+        return pending ? "Hovering" : "Hovered";
+      }
+      if (input.drag_from_to) {
+        return pending ? "Dragging" : "Dragged";
+      }
+      if (input.press_key) {
+        return `${pending ? "Pressing" : "Pressed"} ${input.press_key}`;
+      }
+      if (input.scroll) {
+        return `${pending ? "Scrolling" : "Scrolled"} ${input.scroll}`;
+      }
+      if (input.fill_form) {
+        const count = input.fill_form.length;
+        return `${pending ? "Filling" : "Filled"} ${count} field${count !== 1 ? "s" : ""}`;
+      }
+      if (input.dialog) {
+        return input.dialog === "accept"
+          ? (pending ? "Accepting dialog" : "Accepted dialog")
+          : (pending ? "Dismissing dialog" : "Dismissed dialog");
+      }
+      return pending ? "Interacting" : "Interacted";
+    }
+
+    case "browser_navigate": {
+      if (input.go_to_url) {
+        return `${pending ? "Navigating to" : "Navigated to"} ||${input.go_to_url}||`;
+      }
+      if (input.go_back) {
+        return pending ? "Going back" : "Went back";
+      }
+      if (input.go_forward) {
+        return pending ? "Going forward" : "Went forward";
+      }
+      if (input.reload || input.reload_skip_cache) {
+        return pending ? "Reloading page" : "Reloaded page";
+      }
+      if (input.open_new_tab) {
+        return `${pending ? "Opening new tab" : "Opened new tab"} ||${input.open_new_tab}||`;
+      }
+      if (input.switch_to_tab !== undefined) {
+        return `${pending ? "Switching to" : "Switched to"} tab ${input.switch_to_tab}`;
+      }
+      if (input.close_tab !== undefined) {
+        return `${pending ? "Closing" : "Closed"} tab ${input.close_tab}`;
+      }
+      if (input.wait_for_text) {
+        const preview = input.wait_for_text.length > 20
+          ? `${input.wait_for_text.slice(0, 20)}...`
+          : input.wait_for_text;
+        return `${pending ? "Waiting for" : "Waited for"} "${preview}"`;
+      }
+      return pending ? "Navigating" : "Navigated";
+    }
+
+    // legacy browser tools (for old conversations)
     case "take_snapshot":
-      return pending ? "Taking snapshot" : "Took snapshot";
+      return pending ? "Getting page elements" : "Got page elements";
     case "click": {
       const dbl = input.dblClick;
       return dbl
@@ -185,9 +295,9 @@ function formatBrowserTool(name: string, input: ToolInput, pending: boolean): st
       const val = input.value;
       if (val) {
         const preview = val.length > 20 ? `${val.slice(0, 20)}...` : val;
-        return `${pending ? "Filling" : "Filled"}: "${preview}"`;
+        return `${pending ? "Typing" : "Typed"}: "${preview}"`;
       }
-      return pending ? "Filling field" : "Filled field";
+      return pending ? "Typing" : "Typed";
     }
     case "press_key": {
       const key = input.key;
@@ -198,7 +308,8 @@ function formatBrowserTool(name: string, input: ToolInput, pending: boolean): st
     case "navigate_page": {
       const type = input.type;
       switch (type) {
-        case "goto": {
+        case "goto":
+        case "url": {
           const url = input.url;
           if (url) {
             return `${pending ? "Navigating to" : "Navigated to"} ||${url}||`;
@@ -243,6 +354,10 @@ function formatBrowserTool(name: string, input: ToolInput, pending: boolean): st
       return idx !== undefined
         ? `${pending ? "Closing" : "Closed"} tab ${idx}`
         : pending ? "Closing tab" : "Closed tab";
+    }
+    case "scroll": {
+      const dir = input.direction || input.scroll_direction || "down";
+      return `${pending ? "Scrolling" : "Scrolled"} ${dir}`;
     }
     case "drag":
       return pending ? "Dragging" : "Dragged";

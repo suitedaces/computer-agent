@@ -610,9 +610,12 @@ impl Agent {
                                 // wrap browser operations with a cancellation check
                                 // use tokio::select! to race against stop signal
                                 let running_flag = self.running.clone();
+                                // check if this is a screenshot request (see_page with screenshot=true)
+                                let is_screenshot = name == "see_page" &&
+                                    input.get("screenshot").and_then(|v| v.as_bool()).unwrap_or(false);
                                 let browser_result: Result<BrowserToolResult, String> = {
                                     let tool_future = async {
-                                        if name == "screenshot" {
+                                        if is_screenshot {
                                             match browser.screenshot().await {
                                                 Ok(data) => Ok(BrowserToolResult::Image(data)),
                                                 Err(e) => Err(format!("Screenshot error: {}", e)),
@@ -907,22 +910,9 @@ impl Agent {
 }
 
 const BROWSER_TOOLS: &[&str] = &[
-    "take_snapshot",
-    "click",
-    "hover",
-    "fill",
-    "fill_form",
-    "drag",
-    "press_key",
-    "scroll",
-    "navigate_page",
-    "wait_for",
-    "new_page",
-    "list_pages",
-    "select_page",
-    "close_page",
-    "handle_dialog",
-    "screenshot",
+    "see_page",
+    "page_action",
+    "browser_navigate",
 ];
 
 fn is_browser_tool(name: &str) -> bool {
@@ -935,95 +925,87 @@ async fn execute_browser_tool(
     input: &serde_json::Value,
 ) -> anyhow::Result<String> {
     match name {
-        "take_snapshot" => {
-            let verbose = input.get("verbose").and_then(|v| v.as_bool()).unwrap_or(false);
-            browser.take_snapshot(verbose).await
+        // see_page: observe the page (elements, screenshot, or tabs)
+        "see_page" => {
+            if input.get("screenshot").and_then(|v| v.as_bool()).unwrap_or(false) {
+                // screenshot handled separately in agent loop (returns image)
+                Err(anyhow::anyhow!("screenshot"))
+            } else if input.get("list_tabs").and_then(|v| v.as_bool()).unwrap_or(false) {
+                browser.list_pages().await
+            } else {
+                // default: get elements
+                let verbose = input.get("verbose").and_then(|v| v.as_bool()).unwrap_or(false);
+                browser.take_snapshot(verbose).await
+            }
         }
-        "click" => {
-            let uid = input.get("uid").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
-            let dbl_click = input.get("dblClick").and_then(|v| v.as_bool()).unwrap_or(false);
-            browser.click(uid, dbl_click).await
+
+        // page_action: interact with elements
+        "page_action" => {
+            if let Some(uid) = input.get("click").and_then(|v| v.as_str()) {
+                browser.click(uid, false).await
+            } else if let Some(uid) = input.get("double_click").and_then(|v| v.as_str()) {
+                browser.click(uid, true).await
+            } else if let Some(uid) = input.get("type_into").and_then(|v| v.as_str()) {
+                let text = input.get("text").and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("text required with type_into"))?;
+                browser.fill(uid, text).await
+            } else if let Some(uid) = input.get("hover").and_then(|v| v.as_str()) {
+                browser.hover(uid).await
+            } else if let Some(arr) = input.get("drag_from_to").and_then(|v| v.as_array()) {
+                if arr.len() != 2 {
+                    return Err(anyhow::anyhow!("drag_from_to requires exactly 2 elements: [from, to]"));
+                }
+                let from = arr[0].as_str().ok_or_else(|| anyhow::anyhow!("from element must be string"))?;
+                let to = arr[1].as_str().ok_or_else(|| anyhow::anyhow!("to element must be string"))?;
+                browser.drag(from, to).await
+            } else if let Some(key) = input.get("press_key").and_then(|v| v.as_str()) {
+                browser.press_key(key).await
+            } else if let Some(direction) = input.get("scroll").and_then(|v| v.as_str()) {
+                let pixels = input.get("scroll_pixels").and_then(|v| v.as_i64());
+                browser.scroll(direction, pixels).await
+            } else if let Some(elements) = input.get("fill_form").and_then(|v| v.as_array()) {
+                let pairs: Vec<(String, String)> = elements.iter().filter_map(|el| {
+                    let element = el.get("element").and_then(|v| v.as_str())?;
+                    let text = el.get("text").and_then(|v| v.as_str())?;
+                    Some((element.to_string(), text.to_string()))
+                }).collect();
+                browser.fill_form(&pairs).await
+            } else if let Some(action) = input.get("dialog").and_then(|v| v.as_str()) {
+                let accept = action == "accept";
+                let dialog_text = input.get("dialog_text").and_then(|v| v.as_str());
+                browser.handle_dialog(accept, dialog_text).await
+            } else {
+                Err(anyhow::anyhow!("page_action requires one of: click, double_click, type_into, hover, drag_from_to, press_key, scroll, fill_form, dialog"))
+            }
         }
-        "hover" => {
-            let uid = input.get("uid").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
-            browser.hover(uid).await
+
+        // browser_navigate: navigation and tab management
+        "browser_navigate" => {
+            if let Some(url) = input.get("go_to_url").and_then(|v| v.as_str()) {
+                browser.navigate_page("url", Some(url), false).await
+            } else if input.get("go_back").and_then(|v| v.as_bool()).unwrap_or(false) {
+                browser.navigate_page("back", None, false).await
+            } else if input.get("go_forward").and_then(|v| v.as_bool()).unwrap_or(false) {
+                browser.navigate_page("forward", None, false).await
+            } else if input.get("reload").and_then(|v| v.as_bool()).unwrap_or(false) {
+                browser.navigate_page("reload", None, false).await
+            } else if input.get("reload_skip_cache").and_then(|v| v.as_bool()).unwrap_or(false) {
+                browser.navigate_page("reload", None, true).await
+            } else if let Some(url) = input.get("open_new_tab").and_then(|v| v.as_str()) {
+                browser.new_page(url).await
+            } else if let Some(tab) = input.get("switch_to_tab").and_then(|v| v.as_u64()) {
+                let focus = input.get("focus_tab").and_then(|v| v.as_bool()).unwrap_or(true);
+                browser.select_page(tab as usize, focus).await
+            } else if let Some(tab) = input.get("close_tab").and_then(|v| v.as_u64()) {
+                browser.close_page(tab as usize).await
+            } else if let Some(text) = input.get("wait_for_text").and_then(|v| v.as_str()) {
+                let timeout = input.get("wait_timeout_ms").and_then(|v| v.as_u64()).unwrap_or(5000);
+                browser.wait_for(text, timeout).await
+            } else {
+                Err(anyhow::anyhow!("browser_navigate requires one of: go_to_url, go_back, go_forward, reload, reload_skip_cache, open_new_tab, switch_to_tab, close_tab, wait_for_text"))
+            }
         }
-        "fill" => {
-            let uid = input.get("uid").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("uid required"))?;
-            let value = input.get("value").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("value required"))?;
-            browser.fill(uid, value).await
-        }
-        "press_key" => {
-            let key = input.get("key").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("key required"))?;
-            browser.press_key(key).await
-        }
-        "scroll" => {
-            let direction = input.get("direction").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("direction required"))?;
-            let amount = input.get("amount").and_then(|v| v.as_i64());
-            browser.scroll(direction, amount).await
-        }
-        "navigate_page" => {
-            let nav_type = input.get("type").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("type required"))?;
-            let url = input.get("url").and_then(|v| v.as_str());
-            let ignore_cache = input.get("ignoreCache").and_then(|v| v.as_bool()).unwrap_or(false);
-            browser.navigate_page(nav_type, url, ignore_cache).await
-        }
-        "wait_for" => {
-            let text = input.get("text").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("text required"))?;
-            let timeout = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(5000);
-            browser.wait_for(text, timeout).await
-        }
-        "new_page" => {
-            let url = input.get("url").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("url required"))?;
-            browser.new_page(url).await
-        }
-        "list_pages" => {
-            browser.list_pages().await
-        }
-        "select_page" => {
-            let page_idx = input.get("pageIdx").and_then(|v| v.as_u64())
-                .ok_or_else(|| anyhow::anyhow!("pageIdx required"))? as usize;
-            let bring_to_front = input.get("bringToFront").and_then(|v| v.as_bool()).unwrap_or(false);
-            browser.select_page(page_idx, bring_to_front).await
-        }
-        "close_page" => {
-            let page_idx = input.get("pageIdx").and_then(|v| v.as_u64())
-                .ok_or_else(|| anyhow::anyhow!("pageIdx required"))? as usize;
-            browser.close_page(page_idx).await
-        }
-        "drag" => {
-            let from_uid = input.get("from_uid").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("from_uid required"))?;
-            let to_uid = input.get("to_uid").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("to_uid required"))?;
-            browser.drag(from_uid, to_uid).await
-        }
-        "fill_form" => {
-            let elements = input.get("elements").and_then(|v| v.as_array())
-                .ok_or_else(|| anyhow::anyhow!("elements array required"))?;
-            let pairs: Vec<(String, String)> = elements.iter().filter_map(|el| {
-                let uid = el.get("uid").and_then(|v| v.as_str())?;
-                let value = el.get("value").and_then(|v| v.as_str())?;
-                Some((uid.to_string(), value.to_string()))
-            }).collect();
-            browser.fill_form(&pairs).await
-        }
-        "handle_dialog" => {
-            let action = input.get("action").and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("action required (accept/dismiss)"))?;
-            let accept = action == "accept";
-            let prompt_text = input.get("promptText").and_then(|v| v.as_str());
-            browser.handle_dialog(accept, prompt_text).await
-        }
+
         _ => Err(anyhow::anyhow!("unknown browser tool: {}", name)),
     }
 }

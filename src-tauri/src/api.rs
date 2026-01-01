@@ -730,188 +730,151 @@ Speech style: Conversational. Say "two hundred" not "200". No markdown or URLs."
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
+        // TOOL 1: see_page - observe the current page
         serde_json::json!({
-            "name": "take_snapshot",
-            "description": "Get page accessibility tree with element uids. Call first before interacting.",
+            "name": "see_page",
+            "description": "See what's on the page. By default returns all interactive elements (buttons, links, inputs) with element IDs like '3_42'. You MUST call this first before using page_action. Set screenshot=true to get a visual image instead, or list_tabs=true to see open browser tabs.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "verbose": { "type": "boolean", "description": "Include ignored nodes" }
+                    "screenshot": {
+                        "type": "boolean",
+                        "description": "Return a screenshot image instead of elements. Use when you need to see visual content like images, charts, or CAPTCHAs."
+                    },
+                    "list_tabs": {
+                        "type": "boolean",
+                        "description": "Return a list of all open browser tabs with their URLs and tab numbers."
+                    },
+                    "verbose": {
+                        "type": "boolean",
+                        "description": "Include all elements, not just interactive ones. Default false."
+                    }
                 },
                 "required": []
             }
         }),
+        // TOOL 2: page_action - interact with the page
         serde_json::json!({
-            "name": "click",
-            "description": "Click element by uid",
+            "name": "page_action",
+            "description": "Interact with the page. Use element IDs from see_page (like '3_42') to click, type, scroll, or press keys. Provide exactly ONE action per call.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "uid": { "type": "string", "description": "Element uid from snapshot" },
-                    "dblClick": { "type": "boolean", "description": "Double click" }
-                },
-                "required": ["uid"]
-            }
-        }),
-        serde_json::json!({
-            "name": "hover",
-            "description": "Hover over element by uid",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "uid": { "type": "string", "description": "Element uid from snapshot" }
-                },
-                "required": ["uid"]
-            }
-        }),
-        serde_json::json!({
-            "name": "fill",
-            "description": "Type text into input element",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "uid": { "type": "string", "description": "Input element uid" },
-                    "value": { "type": "string", "description": "Text to type" }
-                },
-                "required": ["uid", "value"]
-            }
-        }),
-        serde_json::json!({
-            "name": "fill_form",
-            "description": "Fill multiple form inputs at once",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "elements": {
+                    "click": {
+                        "type": "string",
+                        "description": "Click this element. Example: \"3_42\""
+                    },
+                    "double_click": {
+                        "type": "string",
+                        "description": "Double-click this element. Example: \"3_42\""
+                    },
+                    "type_into": {
+                        "type": "string",
+                        "description": "Type into this input field. Must also provide 'text'. Example: \"3_10\""
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "The text to type. Use with type_into. Example: \"hello@email.com\""
+                    },
+                    "hover": {
+                        "type": "string",
+                        "description": "Move mouse over this element. Example: \"3_42\""
+                    },
+                    "drag_from_to": {
                         "type": "array",
-                        "description": "Array of {uid, value} pairs",
+                        "items": { "type": "string" },
+                        "description": "Drag from first element to second. Example: [\"3_5\", \"3_10\"]"
+                    },
+                    "press_key": {
+                        "type": "string",
+                        "description": "Press a key. Examples: \"Enter\", \"Tab\", \"Escape\", \"ArrowDown\", \"Control+a\""
+                    },
+                    "scroll": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"],
+                        "description": "Scroll the page in this direction"
+                    },
+                    "scroll_pixels": {
+                        "type": "integer",
+                        "description": "Pixels to scroll (default 500). Use with scroll."
+                    },
+                    "fill_form": {
+                        "type": "array",
                         "items": {
                             "type": "object",
-                            "properties": { "uid": { "type": "string" }, "value": { "type": "string" } },
-                            "required": ["uid", "value"]
-                        }
+                            "properties": {
+                                "element": { "type": "string" },
+                                "text": { "type": "string" }
+                            },
+                            "required": ["element", "text"]
+                        },
+                        "description": "Fill multiple fields at once. Example: [{\"element\": \"3_10\", \"text\": \"John\"}]"
+                    },
+                    "dialog": {
+                        "type": "string",
+                        "enum": ["accept", "dismiss"],
+                        "description": "Handle popup dialog. accept=OK/Yes, dismiss=Cancel/No"
+                    },
+                    "dialog_text": {
+                        "type": "string",
+                        "description": "Text for prompt dialogs. Use with dialog=\"accept\"."
                     }
                 },
-                "required": ["elements"]
+                "required": []
             }
         }),
+        // TOOL 3: browser_navigate - navigation and tab management
         serde_json::json!({
-            "name": "drag",
-            "description": "Drag element to another element",
+            "name": "browser_navigate",
+            "description": "Navigate the browser. Go to URLs, go back/forward, reload, manage tabs, or wait for content. Provide exactly ONE action per call.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "from_uid": { "type": "string", "description": "Source element uid" },
-                    "to_uid": { "type": "string", "description": "Target element uid" }
+                    "go_to_url": {
+                        "type": "string",
+                        "description": "Navigate to this URL. Example: \"https://google.com\""
+                    },
+                    "go_back": {
+                        "type": "boolean",
+                        "description": "Go back to previous page"
+                    },
+                    "go_forward": {
+                        "type": "boolean",
+                        "description": "Go forward to next page"
+                    },
+                    "reload": {
+                        "type": "boolean",
+                        "description": "Reload current page"
+                    },
+                    "reload_skip_cache": {
+                        "type": "boolean",
+                        "description": "Reload and bypass cache"
+                    },
+                    "open_new_tab": {
+                        "type": "string",
+                        "description": "Open new tab with this URL. Example: \"https://github.com\""
+                    },
+                    "switch_to_tab": {
+                        "type": "integer",
+                        "description": "Switch to this tab number (from see_page list_tabs)"
+                    },
+                    "focus_tab": {
+                        "type": "boolean",
+                        "description": "Bring the tab to front when switching. Default true."
+                    },
+                    "close_tab": {
+                        "type": "integer",
+                        "description": "Close this tab number. Cannot close last tab."
+                    },
+                    "wait_for_text": {
+                        "type": "string",
+                        "description": "Wait for this text to appear on page. Example: \"Success\""
+                    },
+                    "wait_timeout_ms": {
+                        "type": "integer",
+                        "description": "Max wait time in milliseconds (default 5000)"
+                    }
                 },
-                "required": ["from_uid", "to_uid"]
-            }
-        }),
-        serde_json::json!({
-            "name": "press_key",
-            "description": "Press key or combo (Enter, Control+A, Shift+Tab)",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "key": { "type": "string", "description": "Key or combo" }
-                },
-                "required": ["key"]
-            }
-        }),
-        serde_json::json!({
-            "name": "scroll",
-            "description": "Scroll the page in a direction",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
-                    "amount": { "type": "number", "description": "Pixels to scroll (default 500)" }
-                },
-                "required": ["direction"]
-            }
-        }),
-        serde_json::json!({
-            "name": "navigate_page",
-            "description": "Navigate: url, back, forward, or reload",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "type": { "type": "string", "enum": ["url", "back", "forward", "reload"] },
-                    "url": { "type": "string", "description": "URL (for type=url)" },
-                    "ignoreCache": { "type": "boolean", "description": "Bypass cache on reload" }
-                },
-                "required": ["type"]
-            }
-        }),
-        serde_json::json!({
-            "name": "wait_for",
-            "description": "Wait for text to appear on page",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "text": { "type": "string", "description": "Text to wait for" },
-                    "timeout": { "type": "number", "description": "Timeout ms (default 5000)" }
-                },
-                "required": ["text"]
-            }
-        }),
-        serde_json::json!({
-            "name": "new_page",
-            "description": "Open new tab with URL",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "url": { "type": "string", "description": "URL to open" }
-                },
-                "required": ["url"]
-            }
-        }),
-        serde_json::json!({
-            "name": "list_pages",
-            "description": "List open tabs",
-            "input_schema": { "type": "object", "properties": {}, "required": [] }
-        }),
-        serde_json::json!({
-            "name": "select_page",
-            "description": "Switch to tab by index",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pageIdx": { "type": "number", "description": "Tab index" },
-                    "bringToFront": { "type": "boolean", "description": "Focus the tab" }
-                },
-                "required": ["pageIdx"]
-            }
-        }),
-        serde_json::json!({
-            "name": "close_page",
-            "description": "Close tab by index (cannot close last tab)",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pageIdx": { "type": "number", "description": "Tab index to close" }
-                },
-                "required": ["pageIdx"]
-            }
-        }),
-        serde_json::json!({
-            "name": "handle_dialog",
-            "description": "Handle browser dialog (alert, confirm, prompt)",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "action": { "type": "string", "enum": ["accept", "dismiss"] },
-                    "promptText": { "type": "string", "description": "Text for prompt dialogs" }
-                },
-                "required": ["action"]
-            }
-        }),
-        serde_json::json!({
-            "name": "screenshot",
-            "description": "Capture a screenshot of the current page. Use when stuck, for visual verification, or to see CAPTCHAs and other visual elements not in the a11y tree.",
-            "input_schema": {
-                "type": "object",
-                "properties": {},
                 "required": []
             }
         }),
