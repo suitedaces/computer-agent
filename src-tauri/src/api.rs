@@ -118,10 +118,25 @@ struct ContextManagement {
 }
 
 #[derive(Debug, Serialize)]
+struct SystemBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+#[derive(Debug, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
+}
+
+#[derive(Debug, Serialize)]
 struct ApiRequest {
     model: String,
     max_tokens: u32,
-    system: String,
+    system: Vec<SystemBlock>,
     tools: Vec<serde_json::Value>,
     messages: Vec<Message>,
     stream: bool,
@@ -170,7 +185,7 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self, mode: AgentMode, voice_mode: bool) -> Vec<serde_json::Value> {
+    fn build_tools(&self, mode: AgentMode) -> Vec<serde_json::Value> {
         let mut tools = Vec::new();
 
         match mode {
@@ -211,22 +226,32 @@ impl AnthropicClient {
             "max_content_tokens": 50000
         }));
 
-        // speak tool for voice mode
-        if voice_mode {
-            tools.push(serde_json::json!({
-                "name": "speak",
-                "description": "Speak to the user via text-to-speech. This is your only communication channel - the user cannot see any text you write. Use speak() for responses, confirmations, questions, and updates. Keep it conversational and concise (1-3 sentences).",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "text": {
-                            "type": "string",
-                            "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
-                        }
-                    },
-                    "required": ["text"]
-                }
-            }));
+        // speak tool always included for stable tool caching
+        // voice mode system prompt tells the model when to use it
+        tools.push(serde_json::json!({
+            "name": "speak",
+            "description": "Speak to the user via text-to-speech. Only use when voice mode is enabled (you'll be instructed in the system prompt). Converts text to speech audio.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
+                    }
+                },
+                "required": ["text"]
+            }
+        }));
+
+        // add cache_control to last tool to cache all tool definitions
+        // tools are stable per mode, maximizing cache hits across requests
+        if let Some(last_tool) = tools.last_mut() {
+            if let Some(obj) = last_tool.as_object_mut() {
+                obj.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({"type": "ephemeral"}),
+                );
+            }
         }
 
         tools
@@ -239,27 +264,49 @@ impl AnthropicClient {
         mode: AgentMode,
         voice_mode: bool,
     ) -> Result<ApiResult, ApiError> {
-        let mut system = match mode {
-            AgentMode::Computer => SYSTEM_PROMPT.to_string(),
-            AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
+        // build system prompt as array of blocks for caching
+        // base prompt is stable across all requests with same mode
+        let base_prompt = match mode {
+            AgentMode::Computer => SYSTEM_PROMPT,
+            AgentMode::Browser => BROWSER_SYSTEM_PROMPT,
         };
 
-        // append model-specific voice instructions when voice mode is enabled
-        if voice_mode {
-            if self.model.contains("haiku") {
-                system.push_str(VOICE_PROMPT_HAIKU);
+        // voice instructions vary by model, so they go in a separate block
+        // this way base prompt can still be cached even if voice config differs
+        let mut system_blocks = vec![SystemBlock {
+            block_type: "text".to_string(),
+            text: base_prompt.to_string(),
+            cache_control: if voice_mode {
+                None // don't cache here, cache after voice block
             } else {
-                system.push_str(VOICE_PROMPT_OPUS);
-            }
+                Some(CacheControl {
+                    cache_type: "ephemeral".to_string(),
+                })
+            },
+        }];
+
+        if voice_mode {
+            let voice_prompt = if self.model.contains("haiku") {
+                VOICE_PROMPT_HAIKU
+            } else {
+                VOICE_PROMPT_OPUS
+            };
+            system_blocks.push(SystemBlock {
+                block_type: "text".to_string(),
+                text: voice_prompt.to_string(),
+                cache_control: Some(CacheControl {
+                    cache_type: "ephemeral".to_string(),
+                }),
+            });
         }
 
-        let tools = self.build_tools(mode, voice_mode);
-        println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
+        let tools = self.build_tools(mode);
+        println!("[api] Sending {} tools, voice_mode={}", tools.len(), voice_mode);
 
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: MAX_TOKENS,
-            system,
+            system: system_blocks,
             tools,
             messages,
             stream: true,
@@ -353,6 +400,14 @@ impl AnthropicClient {
                                     usage.cache_read_input_tokens = u.get("cache_read_input_tokens")
                                         .and_then(|v| v.as_u64())
                                         .unwrap_or(0) as u32;
+
+                                    // log cache performance
+                                    if usage.cache_read_input_tokens > 0 {
+                                        println!("[api] cache HIT: {} tokens read from cache", usage.cache_read_input_tokens);
+                                    }
+                                    if usage.cache_creation_input_tokens > 0 {
+                                        println!("[api] cache WRITE: {} tokens written to cache", usage.cache_creation_input_tokens);
+                                    }
                                 }
                             }
                         }
