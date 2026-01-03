@@ -118,10 +118,25 @@ struct ContextManagement {
 }
 
 #[derive(Debug, Serialize)]
+struct SystemBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+#[derive(Debug, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
+}
+
+#[derive(Debug, Serialize)]
 struct ApiRequest {
     model: String,
     max_tokens: u32,
-    system: String,
+    system: Vec<SystemBlock>,
     tools: Vec<serde_json::Value>,
     messages: Vec<Message>,
     stream: bool,
@@ -170,7 +185,7 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self, mode: AgentMode, voice_mode: bool) -> Vec<serde_json::Value> {
+    fn build_tools(&self, mode: AgentMode) -> Vec<serde_json::Value> {
         let mut tools = Vec::new();
 
         match mode {
@@ -211,22 +226,32 @@ impl AnthropicClient {
             "max_content_tokens": 50000
         }));
 
-        // speak tool for voice mode
-        if voice_mode {
-            tools.push(serde_json::json!({
-                "name": "speak",
-                "description": "Speak to the user via text-to-speech. This is your only communication channel - the user cannot see any text you write. Use speak() for responses, confirmations, questions, and updates. Keep it conversational and concise (1-3 sentences).",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "text": {
-                            "type": "string",
-                            "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
-                        }
-                    },
-                    "required": ["text"]
-                }
-            }));
+        // speak tool always included for stable tool caching
+        // voice mode system prompt tells the model when to use it
+        tools.push(serde_json::json!({
+            "name": "speak",
+            "description": "Speak to the user via text-to-speech. Only use when voice mode is enabled (you'll be instructed in the system prompt). Converts text to speech audio.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
+                    }
+                },
+                "required": ["text"]
+            }
+        }));
+
+        // add cache_control to last tool to cache all tool definitions
+        // tools are stable per mode, maximizing cache hits across requests
+        if let Some(last_tool) = tools.last_mut() {
+            if let Some(obj) = last_tool.as_object_mut() {
+                obj.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({"type": "ephemeral"}),
+                );
+            }
         }
 
         tools
@@ -239,27 +264,49 @@ impl AnthropicClient {
         mode: AgentMode,
         voice_mode: bool,
     ) -> Result<ApiResult, ApiError> {
-        let mut system = match mode {
-            AgentMode::Computer => SYSTEM_PROMPT.to_string(),
-            AgentMode::Browser => BROWSER_SYSTEM_PROMPT.to_string(),
+        // build system prompt as array of blocks for caching
+        // base prompt is stable across all requests with same mode
+        let base_prompt = match mode {
+            AgentMode::Computer => SYSTEM_PROMPT,
+            AgentMode::Browser => BROWSER_SYSTEM_PROMPT,
         };
 
-        // append model-specific voice instructions when voice mode is enabled
-        if voice_mode {
-            if self.model.contains("haiku") {
-                system.push_str(VOICE_PROMPT_HAIKU);
+        // voice instructions vary by model, so they go in a separate block
+        // this way base prompt can still be cached even if voice config differs
+        let mut system_blocks = vec![SystemBlock {
+            block_type: "text".to_string(),
+            text: base_prompt.to_string(),
+            cache_control: if voice_mode {
+                None // don't cache here, cache after voice block
             } else {
-                system.push_str(VOICE_PROMPT_OPUS);
-            }
+                Some(CacheControl {
+                    cache_type: "ephemeral".to_string(),
+                })
+            },
+        }];
+
+        if voice_mode {
+            let voice_prompt = if self.model.contains("haiku") {
+                VOICE_PROMPT_HAIKU
+            } else {
+                VOICE_PROMPT_OPUS
+            };
+            system_blocks.push(SystemBlock {
+                block_type: "text".to_string(),
+                text: voice_prompt.to_string(),
+                cache_control: Some(CacheControl {
+                    cache_type: "ephemeral".to_string(),
+                }),
+            });
         }
 
-        let tools = self.build_tools(mode, voice_mode);
-        println!("[api] Sending {} tools: {:?}", tools.len(), tools.iter().map(|t| t.get("name")).collect::<Vec<_>>());
+        let tools = self.build_tools(mode);
+        println!("[api] Sending {} tools, voice_mode={}", tools.len(), voice_mode);
 
         let request = ApiRequest {
             model: self.model.clone(),
             max_tokens: MAX_TOKENS,
-            system,
+            system: system_blocks,
             tools,
             messages,
             stream: true,
@@ -353,6 +400,14 @@ impl AnthropicClient {
                                     usage.cache_read_input_tokens = u.get("cache_read_input_tokens")
                                         .and_then(|v| v.as_u64())
                                         .unwrap_or(0) as u32;
+
+                                    // log cache performance
+                                    if usage.cache_read_input_tokens > 0 {
+                                        println!("[api] cache HIT: {} tokens read from cache", usage.cache_read_input_tokens);
+                                    }
+                                    if usage.cache_creation_input_tokens > 0 {
+                                        println!("[api] cache WRITE: {} tokens written to cache", usage.cache_creation_input_tokens);
+                                    }
                                 }
                             }
                         }
@@ -730,188 +785,151 @@ Speech style: Conversational. Say "two hundred" not "200". No markdown or URLs."
 
 fn build_browser_tools() -> Vec<serde_json::Value> {
     vec![
+        // TOOL 1: see_page - observe the current page
         serde_json::json!({
-            "name": "take_snapshot",
-            "description": "Get page accessibility tree with element uids. Call first before interacting.",
+            "name": "see_page",
+            "description": "See what's on the page. By default returns all interactive elements (buttons, links, inputs) with element IDs like '3_42'. You MUST call this first before using page_action. Set screenshot=true to get a visual image instead, or list_tabs=true to see open browser tabs.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "verbose": { "type": "boolean", "description": "Include ignored nodes" }
+                    "screenshot": {
+                        "type": "boolean",
+                        "description": "Return a screenshot image instead of elements. Use when you need to see visual content like images, charts, or CAPTCHAs."
+                    },
+                    "list_tabs": {
+                        "type": "boolean",
+                        "description": "Return a list of all open browser tabs with their URLs and tab numbers."
+                    },
+                    "verbose": {
+                        "type": "boolean",
+                        "description": "Include all elements, not just interactive ones. Default false."
+                    }
                 },
                 "required": []
             }
         }),
+        // TOOL 2: page_action - interact with the page
         serde_json::json!({
-            "name": "click",
-            "description": "Click element by uid",
+            "name": "page_action",
+            "description": "Interact with the page. Use element IDs from see_page (like '3_42') to click, type, scroll, or press keys. Provide exactly ONE action per call.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "uid": { "type": "string", "description": "Element uid from snapshot" },
-                    "dblClick": { "type": "boolean", "description": "Double click" }
-                },
-                "required": ["uid"]
-            }
-        }),
-        serde_json::json!({
-            "name": "hover",
-            "description": "Hover over element by uid",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "uid": { "type": "string", "description": "Element uid from snapshot" }
-                },
-                "required": ["uid"]
-            }
-        }),
-        serde_json::json!({
-            "name": "fill",
-            "description": "Type text into input element",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "uid": { "type": "string", "description": "Input element uid" },
-                    "value": { "type": "string", "description": "Text to type" }
-                },
-                "required": ["uid", "value"]
-            }
-        }),
-        serde_json::json!({
-            "name": "fill_form",
-            "description": "Fill multiple form inputs at once",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "elements": {
+                    "click": {
+                        "type": "string",
+                        "description": "Click this element. Example: \"3_42\""
+                    },
+                    "double_click": {
+                        "type": "string",
+                        "description": "Double-click this element. Example: \"3_42\""
+                    },
+                    "type_into": {
+                        "type": "string",
+                        "description": "Type into this input field. Must also provide 'text'. Example: \"3_10\""
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "The text to type. Use with type_into. Example: \"hello@email.com\""
+                    },
+                    "hover": {
+                        "type": "string",
+                        "description": "Move mouse over this element. Example: \"3_42\""
+                    },
+                    "drag_from_to": {
                         "type": "array",
-                        "description": "Array of {uid, value} pairs",
+                        "items": { "type": "string" },
+                        "description": "Drag from first element to second. Example: [\"3_5\", \"3_10\"]"
+                    },
+                    "press_key": {
+                        "type": "string",
+                        "description": "Press a key. Examples: \"Enter\", \"Tab\", \"Escape\", \"ArrowDown\", \"Control+a\""
+                    },
+                    "scroll": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"],
+                        "description": "Scroll the page in this direction"
+                    },
+                    "scroll_pixels": {
+                        "type": "integer",
+                        "description": "Pixels to scroll (default 500). Use with scroll."
+                    },
+                    "fill_form": {
+                        "type": "array",
                         "items": {
                             "type": "object",
-                            "properties": { "uid": { "type": "string" }, "value": { "type": "string" } },
-                            "required": ["uid", "value"]
-                        }
+                            "properties": {
+                                "element": { "type": "string" },
+                                "text": { "type": "string" }
+                            },
+                            "required": ["element", "text"]
+                        },
+                        "description": "Fill multiple fields at once. Example: [{\"element\": \"3_10\", \"text\": \"John\"}]"
+                    },
+                    "dialog": {
+                        "type": "string",
+                        "enum": ["accept", "dismiss"],
+                        "description": "Handle popup dialog. accept=OK/Yes, dismiss=Cancel/No"
+                    },
+                    "dialog_text": {
+                        "type": "string",
+                        "description": "Text for prompt dialogs. Use with dialog=\"accept\"."
                     }
                 },
-                "required": ["elements"]
+                "required": []
             }
         }),
+        // TOOL 3: browser_navigate - navigation and tab management
         serde_json::json!({
-            "name": "drag",
-            "description": "Drag element to another element",
+            "name": "browser_navigate",
+            "description": "Navigate the browser. Go to URLs, go back/forward, reload, manage tabs, or wait for content. Provide exactly ONE action per call.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "from_uid": { "type": "string", "description": "Source element uid" },
-                    "to_uid": { "type": "string", "description": "Target element uid" }
+                    "go_to_url": {
+                        "type": "string",
+                        "description": "Navigate to this URL. Example: \"https://google.com\""
+                    },
+                    "go_back": {
+                        "type": "boolean",
+                        "description": "Go back to previous page"
+                    },
+                    "go_forward": {
+                        "type": "boolean",
+                        "description": "Go forward to next page"
+                    },
+                    "reload": {
+                        "type": "boolean",
+                        "description": "Reload current page"
+                    },
+                    "reload_skip_cache": {
+                        "type": "boolean",
+                        "description": "Reload and bypass cache"
+                    },
+                    "open_new_tab": {
+                        "type": "string",
+                        "description": "Open new tab with this URL. Example: \"https://github.com\""
+                    },
+                    "switch_to_tab": {
+                        "type": "integer",
+                        "description": "Switch to this tab number (from see_page list_tabs)"
+                    },
+                    "focus_tab": {
+                        "type": "boolean",
+                        "description": "Bring the tab to front when switching. Default true."
+                    },
+                    "close_tab": {
+                        "type": "integer",
+                        "description": "Close this tab number. Cannot close last tab."
+                    },
+                    "wait_for_text": {
+                        "type": "string",
+                        "description": "Wait for this text to appear on page. Example: \"Success\""
+                    },
+                    "wait_timeout_ms": {
+                        "type": "integer",
+                        "description": "Max wait time in milliseconds (default 5000)"
+                    }
                 },
-                "required": ["from_uid", "to_uid"]
-            }
-        }),
-        serde_json::json!({
-            "name": "press_key",
-            "description": "Press key or combo (Enter, Control+A, Shift+Tab)",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "key": { "type": "string", "description": "Key or combo" }
-                },
-                "required": ["key"]
-            }
-        }),
-        serde_json::json!({
-            "name": "scroll",
-            "description": "Scroll the page in a direction",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
-                    "amount": { "type": "number", "description": "Pixels to scroll (default 500)" }
-                },
-                "required": ["direction"]
-            }
-        }),
-        serde_json::json!({
-            "name": "navigate_page",
-            "description": "Navigate: url, back, forward, or reload",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "type": { "type": "string", "enum": ["url", "back", "forward", "reload"] },
-                    "url": { "type": "string", "description": "URL (for type=url)" },
-                    "ignoreCache": { "type": "boolean", "description": "Bypass cache on reload" }
-                },
-                "required": ["type"]
-            }
-        }),
-        serde_json::json!({
-            "name": "wait_for",
-            "description": "Wait for text to appear on page",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "text": { "type": "string", "description": "Text to wait for" },
-                    "timeout": { "type": "number", "description": "Timeout ms (default 5000)" }
-                },
-                "required": ["text"]
-            }
-        }),
-        serde_json::json!({
-            "name": "new_page",
-            "description": "Open new tab with URL",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "url": { "type": "string", "description": "URL to open" }
-                },
-                "required": ["url"]
-            }
-        }),
-        serde_json::json!({
-            "name": "list_pages",
-            "description": "List open tabs",
-            "input_schema": { "type": "object", "properties": {}, "required": [] }
-        }),
-        serde_json::json!({
-            "name": "select_page",
-            "description": "Switch to tab by index",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pageIdx": { "type": "number", "description": "Tab index" },
-                    "bringToFront": { "type": "boolean", "description": "Focus the tab" }
-                },
-                "required": ["pageIdx"]
-            }
-        }),
-        serde_json::json!({
-            "name": "close_page",
-            "description": "Close tab by index (cannot close last tab)",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pageIdx": { "type": "number", "description": "Tab index to close" }
-                },
-                "required": ["pageIdx"]
-            }
-        }),
-        serde_json::json!({
-            "name": "handle_dialog",
-            "description": "Handle browser dialog (alert, confirm, prompt)",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "action": { "type": "string", "enum": ["accept", "dismiss"] },
-                    "promptText": { "type": "string", "description": "Text for prompt dialogs" }
-                },
-                "required": ["action"]
-            }
-        }),
-        serde_json::json!({
-            "name": "screenshot",
-            "description": "Capture a screenshot of the current page. Use when stuck, for visual verification, or to see CAPTCHAs and other visual elements not in the a11y tree.",
-            "input_schema": {
-                "type": "object",
-                "properties": {},
                 "required": []
             }
         }),
