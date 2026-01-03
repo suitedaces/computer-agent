@@ -634,6 +634,139 @@ impl BrowserClient {
         Ok(BASE64.encode(&bytes))
     }
 
+    // tool: get_page_text - extract raw text content from page
+    pub async fn get_page_text(&self) -> Result<String> {
+        let page = self.selected_page()?;
+
+        let js = r#"
+            (function() {
+                const body = document.body;
+                if (!body) return '';
+                // get text, normalize whitespace
+                let text = body.innerText || body.textContent || '';
+                // collapse multiple newlines
+                text = text.replace(/\n{3,}/g, '\n\n');
+                // limit to 50k chars
+                if (text.length > 50000) {
+                    text = text.substring(0, 50000) + '\n\n[truncated - page text exceeds 50000 characters]';
+                }
+                return text;
+            })()
+        "#;
+
+        let result = page.evaluate(js).await?;
+        let text = result.into_value::<String>().unwrap_or_default();
+        Ok(text)
+    }
+
+    // tool: run_javascript - execute arbitrary JS and return result
+    pub async fn run_javascript(&self, code: &str) -> Result<String> {
+        let page = self.selected_page()?;
+
+        // wrap in async IIFE to support await
+        let wrapped = format!(
+            r#"(async () => {{
+                try {{
+                    const result = await (async () => {{ {} }})();
+                    return JSON.stringify(result, null, 2);
+                }} catch (e) {{
+                    return 'Error: ' + e.message;
+                }}
+            }})()"#,
+            code
+        );
+
+        let result = page.evaluate(wrapped).await?;
+        let output = result.into_value::<String>().unwrap_or_else(|_| "undefined".to_string());
+        Ok(output)
+    }
+
+    // tool: right_click - context menu click
+    pub async fn right_click(&mut self, uid: &str) -> Result<String> {
+        let (x, y) = self.resolve_uid_to_point(uid).await?;
+        let page = self.selected_page()?;
+
+        // move mouse
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MouseMoved)
+                .x(x)
+                .y(y)
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+        // right mouse down
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MousePressed)
+                .x(x)
+                .y(y)
+                .button(MouseButton::Right)
+                .click_count(1)
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+        // right mouse up
+        page.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MouseReleased)
+                .x(x)
+                .y(y)
+                .button(MouseButton::Right)
+                .click_count(1)
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+        Ok("Successfully right-clicked on element".to_string())
+    }
+
+    // tool: find - search for elements by text/description
+    pub async fn find_elements(&mut self, query: &str) -> Result<String> {
+        // take a fresh snapshot first
+        let snapshot = self.take_snapshot(false).await?;
+
+        let query_lower = query.to_lowercase();
+        let mut matches: Vec<String> = Vec::new();
+
+        for line in snapshot.lines() {
+            let line_lower = line.to_lowercase();
+            // match if line contains the query text
+            if line_lower.contains(&query_lower) {
+                matches.push(line.to_string());
+            }
+        }
+
+        if matches.is_empty() {
+            Ok(format!("No elements found matching '{}'. Try a different search term or use see_page to view all elements.", query))
+        } else {
+            let count = matches.len();
+            let result = if count > 20 {
+                format!(
+                    "Found {} matches for '{}' (showing first 20):\n\n{}",
+                    count,
+                    query,
+                    matches[..20].join("\n")
+                )
+            } else {
+                format!("Found {} matches for '{}':\n\n{}", count, query, matches.join("\n"))
+            };
+            Ok(result)
+        }
+    }
+
+    // tool: get_current_url - return current page URL
+    pub async fn get_current_url(&self) -> Result<String> {
+        let page = self.selected_page()?;
+        let url = page.url().await?.unwrap_or_else(|| "about:blank".to_string());
+        Ok(url)
+    }
+
     // helper: get backend node id from uid
     fn get_backend_node_id(&self, uid: &str) -> Result<BackendNodeId> {
         // validate snapshot id

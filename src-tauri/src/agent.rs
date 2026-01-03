@@ -913,6 +913,9 @@ const BROWSER_TOOLS: &[&str] = &[
     "see_page",
     "page_action",
     "browser_navigate",
+    "get_page_text",
+    "find",
+    "run_javascript",
 ];
 
 fn is_browser_tool(name: &str) -> bool {
@@ -943,6 +946,8 @@ async fn execute_browser_tool(
         "page_action" => {
             if let Some(uid) = input.get("click").and_then(|v| v.as_str()) {
                 browser.click(uid, false).await
+            } else if let Some(uid) = input.get("right_click").and_then(|v| v.as_str()) {
+                browser.right_click(uid).await
             } else if let Some(uid) = input.get("double_click").and_then(|v| v.as_str()) {
                 browser.click(uid, true).await
             } else if let Some(uid) = input.get("type_into").and_then(|v| v.as_str()) {
@@ -1004,6 +1009,25 @@ async fn execute_browser_tool(
             } else {
                 Err(anyhow::anyhow!("browser_navigate requires one of: go_to_url, go_back, go_forward, reload, reload_skip_cache, open_new_tab, switch_to_tab, close_tab, wait_for_text"))
             }
+        }
+
+        // get_page_text: extract raw text
+        "get_page_text" => {
+            browser.get_page_text().await
+        }
+
+        // find: search for elements
+        "find" => {
+            let query = input.get("query").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("query is required"))?;
+            browser.find_elements(query).await
+        }
+
+        // run_javascript: execute arbitrary JS
+        "run_javascript" => {
+            let code = input.get("code").and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("code is required"))?;
+            browser.run_javascript(code).await
         }
 
         _ => Err(anyhow::anyhow!("unknown browser tool: {}", name)),

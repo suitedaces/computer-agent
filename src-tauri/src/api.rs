@@ -185,7 +185,7 @@ impl AnthropicClient {
         }
     }
 
-    fn build_tools(&self, mode: AgentMode) -> Vec<serde_json::Value> {
+    fn build_tools(&self, mode: AgentMode, voice_mode: bool) -> Vec<serde_json::Value> {
         let mut tools = Vec::new();
 
         match mode {
@@ -226,25 +226,26 @@ impl AnthropicClient {
             "max_content_tokens": 50000
         }));
 
-        // speak tool always included for stable tool caching
-        // voice mode system prompt tells the model when to use it
-        tools.push(serde_json::json!({
-            "name": "speak",
-            "description": "Speak to the user via text-to-speech. Only use when voice mode is enabled (you'll be instructed in the system prompt). Converts text to speech audio.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
-                    }
-                },
-                "required": ["text"]
-            }
-        }));
+        // speak tool only in voice mode to avoid spurious TTS calls
+        if voice_mode {
+            tools.push(serde_json::json!({
+                "name": "speak",
+                "description": "Speak to the user via text-to-speech. This is your only communication channel - the user cannot see any text you write. Use speak() for responses, confirmations, questions, and updates. Keep it conversational and concise (1-3 sentences).",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Natural spoken text. No markdown, code blocks, URLs, or special characters - just words you would say aloud."
+                        }
+                    },
+                    "required": ["text"]
+                }
+            }));
+        }
 
-        // add cache_control to last tool to cache all tool definitions
-        // tools are stable per mode, maximizing cache hits across requests
+        // cache_control on last tool - caches all tool definitions
+        // cache key = (mode, voice_mode), hits within same session config
         if let Some(last_tool) = tools.last_mut() {
             if let Some(obj) = last_tool.as_object_mut() {
                 obj.insert(
@@ -300,7 +301,7 @@ impl AnthropicClient {
             });
         }
 
-        let tools = self.build_tools(mode);
+        let tools = self.build_tools(mode, voice_mode);
         println!("[api] Sending {} tools, voice_mode={}", tools.len(), voice_mode);
 
         let request = ApiRequest {
@@ -819,6 +820,10 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
                         "type": "string",
                         "description": "Click this element. Example: \"3_42\""
                     },
+                    "right_click": {
+                        "type": "string",
+                        "description": "Right-click this element to open context menu. Example: \"3_42\""
+                    },
                     "double_click": {
                         "type": "string",
                         "description": "Double-click this element. Example: \"3_42\""
@@ -931,6 +936,46 @@ fn build_browser_tools() -> Vec<serde_json::Value> {
                     }
                 },
                 "required": []
+            }
+        }),
+        // TOOL 4: get_page_text - extract raw text
+        serde_json::json!({
+            "name": "get_page_text",
+            "description": "Extract all text content from the page. Returns plain text without HTML. Useful for reading articles, documentation, or when you need the full text content.",
+            "input_schema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        // TOOL 5: find - search for elements
+        serde_json::json!({
+            "name": "find",
+            "description": "Find elements on the page matching a search query. Returns element IDs you can use with page_action. Use this to quickly locate specific buttons, links, or inputs.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Text to search for in element names/labels. Example: \"login\", \"submit\", \"search\""
+                    }
+                },
+                "required": ["query"]
+            }
+        }),
+        // TOOL 6: run_javascript - execute arbitrary JS
+        serde_json::json!({
+            "name": "run_javascript",
+            "description": "Execute JavaScript code in the page context. Returns the result as JSON. Use for advanced DOM manipulation, reading page state, or when other tools aren't sufficient.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "JavaScript code to execute. Can use await. Example: \"return document.title\" or \"return Array.from(document.querySelectorAll('a')).map(a => a.href)\""
+                    }
+                },
+                "required": ["code"]
             }
         }),
     ]
