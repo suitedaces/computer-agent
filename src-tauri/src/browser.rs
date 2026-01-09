@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -36,11 +37,19 @@ const CHROME_PROFILES: &[&str] = &[
 pub struct BrowserClient {
     browser: Browser,
     _handler_task: tokio::task::JoinHandle<()>,
+    connection_alive: Arc<AtomicBool>,
     pages: Vec<Page>,
     selected_page_idx: usize,
     // snapshot state
     snapshot_id: u64,
     uid_to_backend_node: HashMap<String, BackendNodeId>,
+}
+
+impl BrowserClient {
+    /// check if the CDP connection is still alive
+    pub fn is_connected(&self) -> bool {
+        self.connection_alive.load(Ordering::SeqCst)
+    }
 }
 
 impl BrowserClient {
@@ -50,8 +59,10 @@ impl BrowserClient {
             println!("[browser] Connecting to existing Chrome at {}", ws_url);
             match Browser::connect(&ws_url).await {
                 Ok((mut browser, handler)) => {
+                    let connection_alive = Arc::new(AtomicBool::new(true));
+                    let alive_flag = connection_alive.clone();
                     let handler_task = tokio::spawn(async move {
-                        handler_loop(handler).await;
+                        handler_loop(handler, alive_flag).await;
                     });
 
                     // fetch existing targets so we can see tabs that were already open
@@ -63,6 +74,7 @@ impl BrowserClient {
                     return Ok(Self {
                         browser,
                         _handler_task: handler_task,
+                        connection_alive,
                         pages,
                         selected_page_idx: 0,
                         snapshot_id: 0,
@@ -89,14 +101,17 @@ impl BrowserClient {
             }
         };
 
+        let connection_alive = Arc::new(AtomicBool::new(true));
+        let alive_flag = connection_alive.clone();
         let handler_task = tokio::spawn(async move {
-            handler_loop(handler).await;
+            handler_loop(handler, alive_flag).await;
         });
 
         let pages = browser.pages().await.unwrap_or_default();
         Ok(Self {
             browser,
             _handler_task: handler_task,
+            connection_alive,
             pages,
             selected_page_idx: 0,
             snapshot_id: 0,
@@ -502,13 +517,13 @@ impl BrowserClient {
             ));
         }
 
-        self.selected_page_idx = page_idx;
-
+        // bring to front first before changing index (in case it fails)
         if bring_to_front {
             let page = &self.pages[page_idx];
             page.bring_to_front().await?;
         }
 
+        self.selected_page_idx = page_idx;
         Ok(format!("Selected page {page_idx}"))
     }
 
@@ -816,13 +831,16 @@ impl BrowserClient {
     }
 }
 
-// handler event loop
-async fn handler_loop(mut handler: Handler) {
+// handler event loop - sets connection_alive to false when connection dies
+async fn handler_loop(mut handler: Handler, connection_alive: Arc<AtomicBool>) {
     while let Some(event) = handler.next().await {
-        if event.is_err() {
+        if let Err(e) = event {
+            println!("[browser] CDP handler error: {:?}", e);
             break;
         }
     }
+    println!("[browser] CDP connection closed");
+    connection_alive.store(false, Ordering::SeqCst);
 }
 
 // check if chrome is already running (macOS)
@@ -908,8 +926,10 @@ pub async fn restart_chrome_with_debugging() -> Result<BrowserClient> {
 
     println!("[browser] Connected to Chrome with debugging");
 
+    let connection_alive = Arc::new(AtomicBool::new(true));
+    let alive_flag = connection_alive.clone();
     let handler_task = tokio::spawn(async move {
-        handler_loop(handler).await;
+        handler_loop(handler, alive_flag).await;
     });
 
     // fetch existing targets
@@ -921,6 +941,7 @@ pub async fn restart_chrome_with_debugging() -> Result<BrowserClient> {
     Ok(BrowserClient {
         browser,
         _handler_task: handler_task,
+        connection_alive,
         pages,
         selected_page_idx: 0,
         snapshot_id: 0,

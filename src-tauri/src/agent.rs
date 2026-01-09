@@ -606,13 +606,34 @@ impl Agent {
                             let _ = app_handle.emit("agent:browser_tool", serde_json::json!({ "name": name }));
 
                             let mut browser_guard = self.browser_client.lock().await;
+
+                            // check if connection died and try to reconnect
+                            let needs_reconnect = if let Some(ref browser) = *browser_guard {
+                                !browser.is_connected()
+                            } else {
+                                true
+                            };
+
+                            if needs_reconnect {
+                                println!("[agent] Browser connection lost, attempting reconnect...");
+                                *browser_guard = None;
+                                match BrowserClient::connect().await {
+                                    Ok(client) => {
+                                        println!("[agent] Browser reconnected");
+                                        *browser_guard = Some(client);
+                                    }
+                                    Err(e) => {
+                                        println!("[agent] Browser reconnect failed: {}", e);
+                                    }
+                                }
+                            }
+
                             if let Some(ref mut browser) = *browser_guard {
-                                // wrap browser operations with a cancellation check
-                                // use tokio::select! to race against stop signal
-                                let running_flag = self.running.clone();
                                 // check if this is a screenshot request (see_page with screenshot=true)
                                 let is_screenshot = name == "see_page" &&
                                     input.get("screenshot").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                                // use timeout instead of cancellation polling to avoid race conditions
                                 let browser_result: Result<BrowserToolResult, String> = {
                                     let tool_future = async {
                                         if is_screenshot {
@@ -628,19 +649,13 @@ impl Agent {
                                         }
                                     };
 
-                                    // poll for cancellation every 100ms
-                                    let cancel_check = async {
-                                        loop {
-                                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                                            if !running_flag.load(Ordering::SeqCst) {
-                                                return;
-                                            }
-                                        }
-                                    };
-
-                                    tokio::select! {
-                                        result = tool_future => result,
-                                        _ = cancel_check => Err("Stopped by user".to_string()),
+                                    // 30 second timeout for browser operations
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(30),
+                                        tool_future
+                                    ).await {
+                                        Ok(result) => result,
+                                        Err(_) => Err("Browser operation timed out".to_string()),
                                     }
                                 };
 
@@ -669,9 +684,9 @@ impl Agent {
                                     }
                                     Err(err_msg) => {
                                         println!("[agent] Browser tool failed: {}", err_msg);
-                                        if err_msg == "Stopped by user" {
-                                            // don't add result, just break
-                                            break;
+                                        // check if this is a connection error - mark for reconnect next time
+                                        if err_msg.contains("receiver is gone") || err_msg.contains("channel closed") {
+                                            println!("[agent] Connection error detected, will reconnect on next call");
                                         }
                                         self.emit(&app_handle, "browser_result", &err_msg, None, None);
                                         tool_results.push(ContentBlock::ToolResult {
@@ -681,7 +696,8 @@ impl Agent {
                                     }
                                 }
                             } else {
-                                let err_msg = "Browser not connected".to_string();
+                                let err_msg = "Browser not connected - please ensure Chrome is running with debugging enabled".to_string();
+                                self.emit(&app_handle, "browser_result", &err_msg, None, None);
                                 tool_results.push(ContentBlock::ToolResult {
                                     tool_use_id: id.clone(),
                                     content: vec![ToolResultContent::Text { text: err_msg }],
