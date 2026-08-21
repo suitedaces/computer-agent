@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "computer-agent": {
+      "type": "local",
+      "command": ["node", "mcp-server/dist/index.js"],
+      "enabled": true
+    }
+  },
+  "permission": {
+    "skill": {
+      "computer-agent": "allow"
+    }
+  }
+}

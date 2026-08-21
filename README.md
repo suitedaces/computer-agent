@@ -44,6 +44,55 @@ npm run tauri build
 
 On macOS, you'll need to grant accessibility permissions when prompted (System Settings → Privacy & Security → Accessibility).
 
+## Use with opencode CLI (new)
+
+This repo now works headless via **MCP server** + **Agent Skill** for `opencode`, Claude Code, Cursor, etc. No Tauri window needed.
+
+**1. Install skill (opencode):**
+```bash
+npx skills add suitedaces/computer-agent -g -a opencode -y
+# or locally
+npx skills add ./skills/computer-agent -g -a opencode -y
+# verify
+npx skills ls -g -a opencode
+```
+
+Skill lives at `skills/computer-agent/SKILL.md:1` and is discovered by opencode at `~/.config/opencode/skills` / `~/.agents/skills` (https://opencode.ai/docs/skills).
+
+**2. Run MCP server:**
+```bash
+cd mcp-server
+npm install          # installs @modelcontextprotocol/sdk, screenshot-desktop
+npm run build
+# optional for mouse/keyboard:
+npm install --include=optional  # gets @nut/nut-js
+node dist/index.js   # stdio - test
+```
+
+**3. Wire into opencode - add to `opencode.json`:**
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "computer-agent": {
+      "type": "local",
+      "command": ["node", "mcp-server/dist/index.js"],
+      "enabled": true
+    }
+  }
+}
+```
+See `opencode.json.example` and `mcp-server/README.md`.
+
+**4. Prompt opencode:**
+```
+use computer-agent to take a screenshot and click the login button at 600,400
+use computer-agent bash_run "ls -la"
+use computer-agent browser_navigate https://example.com
+```
+
+The MCP exposes the same tools as the Tauri app: `computer_screenshot`, `computer_click` (AI 1280x800), `computer_type`, `computer_key`, `computer_scroll`, `computer_drag`, `bash_run` (blocked `rm -rf /` etc), `browser_snapshot`/`browser_navigate`/`browser_tabs` via `http://127.0.0.1:9222`. For full a11y `see_page` use the app Background Mode or `ego-browser`.
+
 ## Shortcuts
 
 - `⌃⇧C` - push-to-talk → computer use mode

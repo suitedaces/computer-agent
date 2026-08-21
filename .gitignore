@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
+!mcp-server/dist/
 target/
 
 # Environment
